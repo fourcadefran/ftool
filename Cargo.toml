@@ -1,0 +1,12 @@
+[package]
+name = "ftool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.53", features = ["derive"] }
+serde = "1.0.228"
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+duckdb = { version = "1.4.3", features = ["bundled"] }
