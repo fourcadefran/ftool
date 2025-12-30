@@ -9,6 +9,11 @@ fn main() {
 
     match cli.command {
         Commands::File(args) => {
+            if let Err(e) = args.validate() {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+
             let file = commands::File::new(args.file);
 
             if args.info {
@@ -41,6 +46,11 @@ fn main() {
         }
 
         Commands::Inspect(args) => {
+            if let Err(e) = args.validate() {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+
             let inspector = match commands::DuckDbInspector::new(args.file) {
                 Ok(i) => i,
                 Err(e) => {
@@ -69,15 +79,17 @@ fn main() {
 
             if let Some(column) = args.null_count {
                 match inspector.null_count(&column) {
-                    Ok(count) => println!(
-                        "Null values in column '{}': {}",
-                        column, count
-                    ),
+                    Ok(count) => println!("Null values in column '{}': {}", column, count),
                     Err(e) => eprintln!("Error counting nulls: {}", e),
                 }
             }
         }
         Commands::Todo(args) => {
+            if let Err(e) = args.validate() {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+
             if let Some(task) = args.add {
                 todo!("Implement add todo: {}", task);
             }
