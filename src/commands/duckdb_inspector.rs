@@ -145,4 +145,36 @@ impl DuckDbInspector {
                 format!("Failed to count nulls in column '{}': {}", column_name, e)
             ))
     }
+
+    /// Converts the parquet file to CSV or Parquet, depending on the target format
+    pub fn convert(&self, target_format: &str) -> Result<String, DuckDbError> {
+        let path = Path::new(&self.file_path);
+        let ext = path.extension().unwrap_or_default();
+
+        if !["csv", "parquet"].contains(&target_format) {
+            return Err(DuckDbError::InvalidFileFormat("Target format not supported".to_string()));
+        }
+
+        if ext == target_format {
+            return Ok(self.file_path.clone());
+        }
+
+        let target_path = path.with_extension(target_format)
+            .to_string_lossy()
+            .to_string();
+
+        let format_str = if target_format == "csv" { "CSV" } else { "PARQUET" };
+
+        let query = format!(
+            "COPY (SELECT * FROM '{}') TO '{}' (FORMAT {})",
+            self.file_path.replace('\'', "''"),
+            target_path.replace('\'', "''"),
+            format_str
+        );
+
+        self.connection.execute(&query, [])
+            .map_err(|e| DuckDbError::QueryError(format!("Failed to convert file: {}", e)))?;
+
+        Ok(target_path)
+    }
 }

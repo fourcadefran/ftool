@@ -83,6 +83,13 @@ fn main() {
                     Err(e) => eprintln!("Error counting nulls: {}", e),
                 }
             }
+            
+            if let Some(format) = args.convert {
+                match inspector.convert(&format) {
+                    Ok(path) => println!("File converted to {}", path),
+                    Err(e) => eprintln!("Error converting file: {}", e),
+                }
+            }
         }
         Commands::Todo(args) => {
             if let Err(e) = args.validate() {

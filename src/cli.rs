@@ -36,6 +36,9 @@ pub struct InspectArgs {
 
     /// Path to the file to inspect
     pub file: String,
+
+    // Convert file
+    pub convert: Option<String>,
 }
 
 impl InspectArgs {
