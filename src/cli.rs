@@ -22,7 +22,7 @@ pub enum Commands {
 
 #[derive(Args)]
 pub struct InspectArgs {
-    /// Display the parquet schema
+    /// Display the file schema (CSV or Parquet)
     #[arg(short = 'd', long = "desc")]
     pub desc: bool,
 
