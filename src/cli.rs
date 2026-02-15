@@ -34,29 +34,35 @@ pub struct InspectArgs {
     #[arg(short = 'n', long = "null-count")]
     pub null_count: Option<String>,
 
+    // Convert file
+    #[arg(short = 'c', long = "convert")]
+    pub convert: Option<String>,
+
     /// Path to the file to inspect
     pub file: String,
-
-    // Convert file
-    pub convert: Option<String>,
 }
 
 impl InspectArgs {
     /// Valida que solo una acción haya sido especificada
     pub fn validate(&self) -> Result<(), String> {
-        let actions = [self.desc, self.row_count, self.null_count.is_some()];
+        let actions = [
+            self.desc,
+            self.row_count,
+            self.null_count.is_some(),
+            self.convert.is_some(),
+        ];
         let count = actions.iter().filter(|&&b| b).count();
 
         if count == 0 {
             return Err(
-                "Must specify at least one action (--desc, --row-count, or --null-count)"
+                "Must specify at least one action (--desc, --row-count, --null-count, or --convert)"
                     .to_string(),
             );
         }
 
         if count > 1 {
             return Err(
-                "Can only specify one action at a time (--desc, --row-count, or --null-count)"
+                "Can only specify one action at a time (--desc, --row-count, --null-count, or --convert)"
                     .to_string(),
             );
         }
