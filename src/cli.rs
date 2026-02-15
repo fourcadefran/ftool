@@ -1,8 +1,10 @@
-use clap::{Parser, Subcommand, Args};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "ftool")]
 #[command(about = "A small toolbox CLI written in Rust")]
+#[command(author = "Francisco Fourcade <franfourcade99@gmail.com>")]
+#[command(version = "0.1.0")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -10,63 +12,153 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Analyze and inspect file properties
     File(FileArgs),
+    /// Manage your todo list
     Todo(TodoArgs),
-    Inspect(InspectArgs)
+    /// Inspect file metadata (Parquet, etc.)
+    Inspect(InspectArgs),
 }
 
 #[derive(Args)]
 pub struct InspectArgs {
-    /// Describe parquet schema
+    /// Display the file schema (CSV or Parquet)
     #[arg(short = 'd', long = "desc")]
     pub desc: bool,
 
-    /// Count total rows
+    /// Count total rows in the file
     #[arg(short = 'r', long = "row-count")]
     pub row_count: bool,
 
-    /// Count nulls in a column
+    /// Count null values in a specific column
     #[arg(short = 'n', long = "null-count")]
     pub null_count: Option<String>,
 
+    // Convert file
+    #[arg(short = 'c', long = "convert")]
+    pub convert: Option<String>,
+
+    /// Path to the file to inspect
     pub file: String,
 }
 
+impl InspectArgs {
+    /// Valida que solo una acción haya sido especificada
+    pub fn validate(&self) -> Result<(), String> {
+        let actions = [
+            self.desc,
+            self.row_count,
+            self.null_count.is_some(),
+            self.convert.is_some(),
+        ];
+        let count = actions.iter().filter(|&&b| b).count();
+
+        if count == 0 {
+            return Err(
+                "Must specify at least one action (--desc, --row-count, --null-count, or --convert)"
+                    .to_string(),
+            );
+        }
+
+        if count > 1 {
+            return Err(
+                "Can only specify one action at a time (--desc, --row-count, --null-count, or --convert)"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Args)]
-pub struct  FileArgs {
-    //info about a file
-    #[arg(short='i', long="info")]
+pub struct FileArgs {
+    /// Display general file information (size, permissions, timestamps)
+    #[arg(short = 'i', long = "info")]
     pub info: bool,
 
-    //lines of a file
-    #[arg(short='l', long="lines")]
+    /// Show the total number of lines in the file
+    #[arg(short = 'l', long = "lines")]
     pub lines: bool,
 
-    //size of a file
-    #[arg(short='s', long="size")]
+    /// Display the file size
+    #[arg(short = 's', long = "size")]
     pub size: bool,
 
-    #[arg(short='h', long="head")]
+    /// Display the first N lines of the file
+    #[arg(short = 'h', long = "head")]
     pub head: Option<usize>,
 
-    pub file: String
+    /// Path to the file to analyze
+    pub file: String,
+}
+
+impl FileArgs {
+    /// Valida que solo una acción haya sido especificada
+    pub fn validate(&self) -> Result<(), String> {
+        let actions = [self.info, self.lines, self.size, self.head.is_some()];
+        let count = actions.iter().filter(|&&b| b).count();
+
+        if count == 0 {
+            return Err(
+                "Must specify at least one action (--info, --lines, --size, or --head)".to_string(),
+            );
+        }
+
+        if count > 1 {
+            return Err(
+                "Can only specify one action at a time (--info, --lines, --size, or --head)"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Args)]
 pub struct TodoArgs {
-    //Add a new todo
-    #[arg(short='a', long="add")]
+    /// Add a new todo item
+    #[arg(short = 'a', long = "add")]
     pub add: Option<String>,
 
-    //list all todos
-    #[arg(short='l', long="list")]
+    /// List all todo items
+    #[arg(short = 'l', long = "list")]
     pub list: bool,
 
-    //mark as done
-    #[arg(short='d', long="done")]
+    /// Mark a todo as completed by its ID
+    #[arg(short = 'd', long = "done")]
     pub done: Option<usize>,
 
-    //remove a todo
-    #[arg(short='r', long="remove")]
-    pub remove: Option<usize>
+    /// Remove a todo item by its ID
+    #[arg(short = 'r', long = "remove")]
+    pub remove: Option<usize>,
+}
+
+impl TodoArgs {
+    /// Valida que solo una acción haya sido especificada
+    pub fn validate(&self) -> Result<(), String> {
+        let actions = [
+            self.add.is_some(),
+            self.list,
+            self.done.is_some(),
+            self.remove.is_some(),
+        ];
+        let count = actions.iter().filter(|&&b| b).count();
+
+        if count == 0 {
+            return Err(
+                "Must specify at least one action (--add, --list, --done, or --remove)".to_string(),
+            );
+        }
+
+        if count > 1 {
+            return Err(
+                "Can only specify one action at a time (--add, --list, --done, or --remove)"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
 }

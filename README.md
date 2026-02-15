@@ -22,13 +22,14 @@ This project is primarily a **learning-oriented Rust CLI**, focused on writing i
 * Mark todos as done
 * Remove todos
 
-### 🔍 Data inspection (Parquet)
+### 🔍 Data inspection (Parquet & CSV)
 
 Powered by **DuckDB (embedded)**:
 
-* Inspect Parquet schema
-* Count total rows
-* Count NULL values per column
+* Inspect Parquet/CSV schema
+* Count total rows in Parquet/CSV files
+* Count NULL values per column in Parquet/CSV files
+* Convert between Parquet and CSV formats
 
 ---
 
@@ -75,12 +76,22 @@ ftool todo -d 1
 ftool todo -r 2
 ```
 
-### Parquet inspection
+### Data file inspection
 
 ```bash
+# Inspect Parquet files
 ftool inspect -d data.parquet
 ftool inspect -r data.parquet
 ftool inspect -n geometry data.parquet
+
+# Inspect CSV files
+ftool inspect -d data.csv
+ftool inspect -r data.csv
+ftool inspect -n name data.csv
+
+# Convert between formats
+ftool inspect -c csv data.parquet
+ftool inspect -c parquet data.csv
 ```
 
 Example output:
@@ -143,9 +154,9 @@ cargo install --path .
 
 * Column statistics (min / max / avg)
 * JSON output mode
-* CSV and JSON inspectors
+* JSON file inspector
 * Shell autocompletion
-* Better validation and error messages
+* Query mode for complex data filtering
 
 ---
 
