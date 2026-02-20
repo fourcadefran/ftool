@@ -1,12 +1,21 @@
 # ftool 🦀
 
-**ftool** is a modular command-line toolbox written in Rust. It combines classic Unix-style file utilities with modern data inspection features, allowing you to inspect files, manage local todos, and analyze Parquet datasets using an embedded DuckDB engine.
+**ftool** is a modular command-line toolbox written in Rust. It combines classic Unix-style file utilities with modern data inspection features, and an interactive TUI for navigating the filesystem and inspecting CSV/Parquet datasets visually.
 
 This project is primarily a **learning-oriented Rust CLI**, focused on writing idiomatic Rust while building real, useful tooling.
 
 ---
 
 ## ✨ Features
+
+### 🖥 Interactive TUI
+
+Built with **ratatui** — launch it by just running `ftool`:
+
+* Home menu with quick actions
+* File browser with directory navigation and file preview
+* Data inspector with Schema and Preview tabs
+* In-TUI file format conversion (CSV ↔ Parquet)
 
 ### 📂 File utilities
 
@@ -15,25 +24,20 @@ This project is primarily a **learning-oriented Rust CLI**, focused on writing i
 * Line count
 * Preview file contents (`head`)
 
-### 📋 Todo manager
-
-* Add todos
-* List todos
-* Mark todos as done
-* Remove todos
-
 ### 🔍 Data inspection (Parquet & CSV)
 
 Powered by **DuckDB (embedded)**:
 
-* Inspect Parquet/CSV schema
-* Count total rows in Parquet/CSV files
-* Count NULL values per column in Parquet/CSV files
+* Inspect schema (column names + types)
+* Count total rows
+* Count NULL values per column
 * Convert between Parquet and CSV formats
+
+### 📋 Todo manager *(coming soon)*
 
 ---
 
-## 🚀 Installation 고려
+## 🚀 Installation
 
 ### Prerequisites
 
@@ -46,60 +50,66 @@ Powered by **DuckDB (embedded)**:
 cargo install --path .
 ```
 
-This will install the `ftool` binary into:
-
-```bash
-~/.cargo/bin/ftool
-```
-
-Make sure `~/.cargo/bin` is in your `PATH`.
+This will install the `ftool` binary into `~/.cargo/bin/ftool`. Make sure `~/.cargo/bin` is in your `PATH`.
 
 ---
 
 ## 🛠 Usage
 
-### File inspection
+### Interactive TUI (default)
 
 ```bash
-ftool file -i Cargo.toml
-ftool file -s Cargo.toml
-ftool file -l src/main.rs
-ftool file -h 10 Cargo.toml
+# Launch TUI at the Home screen
+ftool
+
+# Open file browser in a specific directory
+ftool tui .
+ftool tui ~/data
+
+# Open data inspector directly on a file
+ftool tui data.csv
+ftool tui data.parquet
 ```
 
-### Todo management
+**TUI controls:**
+
+| Screen | Key | Action |
+|---|---|---|
+| Home | `↑↓` / `j k` | Navigate menu |
+| | `Enter` | Select |
+| | `q` | Quit |
+| File Browser | `↑↓` / `j k` | Navigate files |
+| | `Enter` | Open directory / inspect file |
+| | `Esc` | Back to Home |
+| | `q` | Quit |
+| Data Inspector | `Tab` | Switch Schema / Preview |
+| | `↑↓` / `j k` | Scroll |
+| | `c` | Convert format (CSV ↔ Parquet) |
+| | `Esc` | Back to File Browser |
+| | `q` | Quit |
+
+---
+
+### File inspection (CLI)
 
 ```bash
-ftool todo -a "Learn Rust ownership"
-ftool todo -l
-ftool todo -d 1
-ftool todo -r 2
+ftool file -i Cargo.toml      # metadata
+ftool file -s Cargo.toml      # size
+ftool file -l src/main.rs     # line count
+ftool file -h 10 Cargo.toml   # first 10 lines
 ```
 
-### Data file inspection
+### Data file inspection (CLI)
 
 ```bash
-# Inspect Parquet files
+# Schema, row count, null count
 ftool inspect -d data.parquet
-ftool inspect -r data.parquet
-ftool inspect -n geometry data.parquet
-
-# Inspect CSV files
-ftool inspect -d data.csv
 ftool inspect -r data.csv
-ftool inspect -n name data.csv
+ftool inspect -n column_name data.csv
 
-# Convert between formats
-ftool inspect -c csv data.parquet
+# Convert formats
 ftool inspect -c parquet data.csv
-```
-
-Example output:
-
-```
-id                   BIGINT
-geometry             BLOB
-name                 VARCHAR
+ftool inspect -c csv data.parquet
 ```
 
 ---
@@ -109,32 +119,32 @@ name                 VARCHAR
 * Write **idiomatic Rust**
 * Practice ownership, borrowing, and error handling
 * Keep the CLI Unix-like and predictable
-* Prefer explicitness over magic
 * Build something extensible rather than toy examples
 
 ---
 
 ## 📦 Tech stack
 
-* **Rust**
-* **clap** – CLI argument parsing
-* **serde / serde_json** – serialization
-* **DuckDB (bundled)** – embedded analytics engine
-* **Parquet / Arrow** – columnar data formats
+| Crate | Purpose |
+|---|---|
+| **clap** | CLI argument parsing |
+| **ratatui** | Terminal UI framework |
+| **crossterm** | Terminal input/output |
+| **DuckDB (bundled)** | Embedded analytics engine |
+| **serde / serde_json** | Serialization |
 
 ---
 
 ## 🧪 Development
 
-During development:
-
 ```bash
-cargo run -- inspect -r data.parquet
-```
+# Run TUI in development
+cargo run
 
-After changes:
+# Run a specific CLI command
+cargo run -- inspect -d data.parquet
 
-```bash
+# Install after changes
 cargo install --path .
 ```
 
@@ -145,18 +155,18 @@ cargo install --path .
 * Structuring a real-world Rust CLI
 * Error handling with `Result` and `anyhow`
 * Working with embedded databases (DuckDB)
+* Building interactive TUIs with ratatui (TEA pattern)
 * Designing extensible command hierarchies
-* Writing maintainable Rust modules
 
 ---
 
 ## 🔮 Future ideas
 
 * Column statistics (min / max / avg)
-* JSON output mode
 * JSON file inspector
 * Shell autocompletion
 * Query mode for complex data filtering
+* Todo list in TUI
 
 ---
 

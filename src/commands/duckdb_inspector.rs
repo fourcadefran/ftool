@@ -201,6 +201,66 @@ impl DuckDbInspector {
             })
     }
 
+    /// Returns a preview of the first N rows as (headers, rows_of_strings)
+    pub fn preview(&self, limit: usize) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
+        let schema = self.schema()?;
+        let headers: Vec<String> = schema.iter().map(|(name, _)| name.clone()).collect();
+
+        let path = Path::new(&self.file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let read_function = if ext == "csv" {
+            "read_csv_auto"
+        } else {
+            "read_parquet"
+        };
+        let escaped_path = self.file_path.replace('\'', "''");
+
+        // Cast all columns to VARCHAR, replacing NULLs with the string "NULL"
+        let columns: Vec<String> = headers
+            .iter()
+            .map(|name| {
+                let escaped = name.replace('"', "\"\"");
+                format!("COALESCE(CAST(\"{}\" AS VARCHAR), 'NULL')", escaped)
+            })
+            .collect();
+
+        let query = format!(
+            "SELECT {} FROM {}('{}') LIMIT {}",
+            columns.join(", "),
+            read_function,
+            escaped_path,
+            limit
+        );
+
+        let mut stmt = self.connection.prepare(&query).map_err(|e| {
+            DuckDbError::QueryError(format!("Failed to prepare preview query: {}", e))
+        })?;
+
+        let column_count = headers.len();
+        let mut result = Vec::new();
+
+        let rows = stmt
+            .query_map([], |row| {
+                let mut values = Vec::with_capacity(column_count);
+                for i in 0..column_count {
+                    let val: String = row.get(i)?;
+                    values.push(val);
+                }
+                Ok(values)
+            })
+            .map_err(|e| {
+                DuckDbError::QueryError(format!("Failed to execute preview query: {}", e))
+            })?;
+
+        for row_result in rows {
+            result.push(row_result.map_err(|e| {
+                DuckDbError::QueryError(format!("Failed to read preview row: {}", e))
+            })?);
+        }
+
+        Ok((headers, result))
+    }
+
     /// Converts the parquet file to CSV or Parquet, depending on the target format
     pub fn convert(&self, target_format: &str) -> Result<String, DuckDbError> {
         let path = Path::new(&self.file_path);
