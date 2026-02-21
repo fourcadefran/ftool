@@ -201,6 +201,98 @@ impl DuckDbInspector {
             })
     }
 
+    pub fn min_value(&self, column_name: &str) -> Result<String, DuckDbError> {
+        let safe_column = Self::sanitize_identifier(column_name)?;
+
+        let path = Path::new(&self.file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let read_function = if ext == "csv" {
+            "read_csv_auto"
+        } else {
+            "read_parquet"
+        };
+
+        let query = format!(
+            "SELECT CAST(MIN({}) AS VARCHAR) FROM {}('{}')",
+            safe_column,
+            read_function,
+            self.file_path.replace('\'', "''")
+        );
+
+        self.connection
+            .query_row(&query, [], |row| {
+                let val: Option<String> = row.get(0)?;
+                Ok(val.unwrap_or_else(|| "NULL".to_string()))
+            })
+            .map_err(|e| {
+                DuckDbError::QueryError(format!(
+                    "Failed to find min value in column '{}': {}",
+                    column_name, e
+                ))
+            })
+    }
+
+    pub fn max_value(&self, column_name: &str) -> Result<String, DuckDbError> {
+        let safe_column = Self::sanitize_identifier(column_name)?;
+
+        let path = Path::new(&self.file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let read_function = if ext == "csv" {
+            "read_csv_auto"
+        } else {
+            "read_parquet"
+        };
+
+        let query = format!(
+            "SELECT CAST(MAX({}) AS VARCHAR) FROM {}('{}')",
+            safe_column,
+            read_function,
+            self.file_path.replace('\'', "''")
+        );
+
+        self.connection
+            .query_row(&query, [], |row| {
+                let val: Option<String> = row.get(0)?;
+                Ok(val.unwrap_or_else(|| "NULL".to_string()))
+            })
+            .map_err(|e| {
+                DuckDbError::QueryError(format!(
+                    "Failed to find max value in column '{}': {}",
+                    column_name, e
+                ))
+            })
+    }
+    pub fn mean_value(&self, column_name: &str) -> Result<String, DuckDbError> {
+        let safe_column = Self::sanitize_identifier(column_name)?;
+
+        let path = Path::new(&self.file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let read_function = if ext == "csv" {
+            "read_csv_auto"
+        } else {
+            "read_parquet"
+        };
+
+        let query = format!(
+            "SELECT CAST(ROUND(AVG({}), 2) AS VARCHAR) FROM {}('{}')",
+            safe_column,
+            read_function,
+            self.file_path.replace('\'', "''")
+        );
+
+        self.connection
+            .query_row(&query, [], |row| {
+                let val: Option<String> = row.get(0)?;
+                Ok(val.unwrap_or_else(|| "NULL".to_string()))
+            })
+            .map_err(|e| {
+                DuckDbError::QueryError(format!(
+                    "Failed to find mean value in column '{}': {}",
+                    column_name, e
+                ))
+            })
+    }
+
     /// Returns a preview of the first N rows as (headers, rows_of_strings)
     pub fn preview(&self, limit: usize) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
         let schema = self.schema()?;

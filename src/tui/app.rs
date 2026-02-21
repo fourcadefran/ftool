@@ -65,6 +65,9 @@ pub struct App {
     pub inspector_tab: InspectorTab,
     pub inspector_schema: Vec<(String, String)>,
     pub inspector_null_counts: Vec<usize>,
+    pub inspector_mean_values: Vec<String>,
+    pub inspector_min_values: Vec<String>,
+    pub inspector_max_values: Vec<String>,
     pub inspector_preview_headers: Vec<String>,
     pub inspector_preview_data: Vec<Vec<String>>,
     pub inspector_row_count: usize,
@@ -86,6 +89,9 @@ impl App {
             inspector_tab: InspectorTab::Schema,
             inspector_schema: Vec::new(),
             inspector_null_counts: Vec::new(),
+            inspector_mean_values: Vec::new(),
+            inspector_min_values: Vec::new(),
+            inspector_max_values: Vec::new(),
             inspector_preview_headers: Vec::new(),
             inspector_preview_data: Vec::new(),
             inspector_row_count: 0,
@@ -337,10 +343,7 @@ impl App {
 
     fn convert_file(&mut self) {
         if let Some(ref file) = self.inspector_file {
-            let ext = file
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
             let target = if ext == "csv" { "parquet" } else { "csv" };
             self.popup = Popup::ConvertConfirm {
                 target_format: target.to_string(),
@@ -443,6 +446,25 @@ impl App {
             match inspector.null_count(name) {
                 Ok(count) => self.inspector_null_counts.push(count),
                 Err(_) => self.inspector_null_counts.push(0),
+            }
+        }
+
+        self.inspector_mean_values = Vec::new();
+        self.inspector_min_values = Vec::new();
+        self.inspector_max_values = Vec::new();
+
+        for (name, _) in &self.inspector_schema {
+            match inspector.mean_value(name) {
+                Ok(value) => self.inspector_mean_values.push(value),
+                Err(_) => self.inspector_mean_values.push("-".to_string()),
+            }
+            match inspector.min_value(name) {
+                Ok(value) => self.inspector_min_values.push(value),
+                Err(_) => self.inspector_min_values.push("-".to_string()),
+            }
+            match inspector.max_value(name) {
+                Ok(value) => self.inspector_max_values.push(value),
+                Err(_) => self.inspector_max_values.push("-".to_string()),
             }
         }
 

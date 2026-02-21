@@ -25,10 +25,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_default();
-        format!(
-            " Inspector: {} ({} rows) ",
-            name, app.inspector_row_count
-        )
+        format!(" Inspector: {} ({} rows) ", name, app.inspector_row_count)
     } else {
         " Inspector ".to_string()
     };
@@ -37,7 +34,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
         .title(title)
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(main_area);
     frame.render_widget(block, main_area);
@@ -88,7 +89,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_schema(frame: &mut Frame, app: &App, area: Rect) {
-    let header = Row::new(vec!["Column Name", "Type", "Nulls"])
+    let header = Row::new(vec!["Column Name", "Type", "Nulls", "Min", "Max", "Avg"])
         .style(
             Style::default()
                 .fg(Color::Cyan)
@@ -107,15 +108,40 @@ fn render_schema(frame: &mut Frame, app: &App, area: Rect) {
                 .get(i)
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "-".to_string());
-            Row::new(vec![name.clone(), dtype.clone(), null_count])
+            let min = app
+                .inspector_min_values
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| "-".to_string());
+            let max = app
+                .inspector_max_values
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| "-".to_string());
+            let mean = app
+                .inspector_mean_values
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| "-".to_string());
+            Row::new(vec![
+                name.clone(),
+                dtype.clone(),
+                null_count,
+                min,
+                max,
+                mean,
+            ])
         })
         .collect();
 
     let table = Table::new(
         rows,
         [
-            Constraint::Min(20),
-            Constraint::Length(15),
+            Constraint::Min(15),
+            Constraint::Length(12),
+            Constraint::Length(7),
+            Constraint::Length(12),
+            Constraint::Length(12),
             Constraint::Length(10),
         ],
     )
@@ -126,8 +152,8 @@ fn render_schema(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
     if app.inspector_preview_headers.is_empty() {
-        let msg = Paragraph::new("No preview data available")
-            .style(Style::default().fg(Color::Gray));
+        let msg =
+            Paragraph::new("No preview data available").style(Style::default().fg(Color::Gray));
         frame.render_widget(msg, area);
         return;
     }
@@ -151,9 +177,7 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
 
     // Column widths - distribute evenly
     let col_count = app.inspector_preview_headers.len();
-    let widths: Vec<Constraint> = (0..col_count)
-        .map(|_| Constraint::Min(10))
-        .collect();
+    let widths: Vec<Constraint> = (0..col_count).map(|_| Constraint::Min(10)).collect();
 
     let table = Table::new(rows, widths).header(header);
     frame.render_widget(table, area);
@@ -170,7 +194,11 @@ fn render_popup(frame: &mut Frame, app: &App, area: Rect) {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Yellow))
                 .title(" Convert ")
-                .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                .title_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
 
             let inner = block.inner(popup_area);
             frame.render_widget(block, popup_area);
@@ -199,7 +227,9 @@ fn render_popup(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(Paragraph::new(text), inner);
         }
         Popup::Message { title, body } => {
-            let width = (body.len() as u16 + 6).max(30).min(area.width.saturating_sub(4));
+            let width = (body.len() as u16 + 6)
+                .max(30)
+                .min(area.width.saturating_sub(4));
             let popup_area = centered_rect(width, 7, area);
             frame.render_widget(Clear, popup_area);
 
