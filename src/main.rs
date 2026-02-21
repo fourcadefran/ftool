@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod tui;
 
 use clap::Parser;
 use cli::{Cli, Commands};
@@ -8,7 +9,14 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::File(args) => {
+        None => {
+            // No subcommand -> launch TUI
+            if let Err(e) = tui::run(None) {
+                eprintln!("TUI error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::File(args)) => {
             if let Err(e) = args.validate() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
@@ -45,7 +53,7 @@ fn main() {
             }
         }
 
-        Commands::Inspect(args) => {
+        Some(Commands::Inspect(args)) => {
             if let Err(e) = args.validate() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
@@ -91,7 +99,13 @@ fn main() {
                 }
             }
         }
-        Commands::Todo(args) => {
+        Some(Commands::Tui(args)) => {
+            if let Err(e) = tui::run(args.path) {
+                eprintln!("TUI error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Todo(args)) => {
             if let Err(e) = args.validate() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);

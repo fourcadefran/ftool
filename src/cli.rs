@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(version = "0.1.0")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -18,6 +18,8 @@ pub enum Commands {
     Todo(TodoArgs),
     /// Inspect file metadata (Parquet, etc.)
     Inspect(InspectArgs),
+    /// Launch interactive TUI mode
+    Tui(TuiArgs),
 }
 
 #[derive(Args)]
@@ -133,6 +135,12 @@ pub struct TodoArgs {
     /// Remove a todo item by its ID
     #[arg(short = 'r', long = "remove")]
     pub remove: Option<usize>,
+}
+
+#[derive(Args)]
+pub struct TuiArgs {
+    /// Optional path to open (directory or data file)
+    pub path: Option<String>,
 }
 
 impl TodoArgs {
