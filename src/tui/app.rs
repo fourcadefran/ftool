@@ -12,12 +12,26 @@ pub enum Screen {
     Home,
     FileBrowser,
     DataInspector,
+    JsonInspector,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InspectorTab {
     Schema,
     Preview,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum JsonInspectorTab {
+    Tree,
+    Raw,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GeoJsonTab {
+    Summary,
+    Features,
+    Tree,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +54,8 @@ pub enum Message {
     ConvertFile,
     ConfirmConvert,
     ClosePopup,
+    ToggleTreeNode,
+    SwitchGeoTab,
     Noop,
 }
 
@@ -74,6 +90,19 @@ pub struct App {
     pub inspector_scroll: usize,
     // Popup
     pub popup: Popup,
+    // Json inspector
+    pub json_file: Option<PathBuf>,
+    pub json_root: Option<serde_json::Value>,
+    pub json_kind: Option<crate::commands::json_inspector::FileKind>,
+    pub json_tab: JsonInspectorTab,
+    pub geo_tab: GeoJsonTab,
+    pub json_scroll: usize,
+    pub json_tree_nodes: Vec<(String, crate::tui::tree::TreeNode)>,
+    pub json_collapsed: std::collections::HashSet<String>,
+    pub json_features_headers: Vec<String>,
+    pub json_features_data: Vec<Vec<String>>,
+    pub json_geosummary: Option<(usize, Vec<String>, Option<(f64, f64, f64, f64)>)>,
+    pub json_raw: String,
 }
 
 impl App {
@@ -97,6 +126,18 @@ impl App {
             inspector_row_count: 0,
             inspector_scroll: 0,
             popup: Popup::None,
+            json_file: None,
+            json_root: None,
+            json_kind: None,
+            json_tab: JsonInspectorTab::Tree,
+            geo_tab: GeoJsonTab::Summary,
+            json_scroll: 0,
+            json_tree_nodes: Vec::new(),
+            json_collapsed: std::collections::HashSet::new(),
+            json_features_headers: Vec::new(),
+            json_features_data: Vec::new(),
+            json_geosummary: None,
+            json_raw: String::new(),
         };
 
         if let Some(p) = path {
@@ -116,6 +157,14 @@ impl App {
                         app.inspector_file = Some(p.clone());
                         app.load_inspector_data(&p)?;
                         app.current_screen = Screen::DataInspector;
+                    }
+                    Some("json") | Some("geojson") => {
+                        if let Some(parent) = p.parent() {
+                            app.current_dir = parent.to_path_buf();
+                            app.load_dir_entries()?;
+                        }
+                        app.load_json_data(&p)?;
+                        app.current_screen = Screen::JsonInspector;
                     }
                     _ => {
                         // Unknown file type - open browser in parent dir
@@ -189,6 +238,20 @@ impl App {
                 KeyCode::Esc => Message::Back,
                 _ => Message::Noop,
             },
+            Screen::JsonInspector => match key.code {
+                KeyCode::Tab => {
+                    if self.json_kind == Some(crate::commands::json_inspector::FileKind::GeoJson) {
+                        Message::SwitchGeoTab
+                    } else {
+                        Message::SwitchTab
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => Message::ScrollUp,
+                KeyCode::Down | KeyCode::Char('j') => Message::ScrollDown,
+                KeyCode::Enter => Message::ToggleTreeNode,
+                KeyCode::Esc => Message::Back,
+                _ => Message::Noop,
+            },
         }
     }
 
@@ -205,6 +268,8 @@ impl App {
             Message::ConvertFile => self.convert_file(),
             Message::ConfirmConvert => self.confirm_convert(),
             Message::ClosePopup => self.popup = Popup::None,
+            Message::ToggleTreeNode => self.toggle_tree_node(),
+            Message::SwitchGeoTab => self.switch_geo_tab(),
             Message::Noop => {}
         }
     }
@@ -288,16 +353,29 @@ impl App {
                                 }
                             }
                         }
+                        Some("json") | Some("geojson") => match self.load_json_data(&entry_path) {
+                            Ok(()) => self.current_screen = Screen::JsonInspector,
+                            Err(e) => {
+                                self.popup = Popup::Message {
+                                    title: "Error".to_string(),
+                                    body: e.to_string(),
+                                };
+                            }
+                        },
                         _ => {} // Can't open non-data files
                     }
                 }
             }
             Screen::DataInspector => {}
+            Screen::JsonInspector => {}
         }
     }
 
     fn back(&mut self) {
         match self.current_screen {
+            Screen::JsonInspector => {
+                self.current_screen = Screen::FileBrowser;
+            }
             Screen::DataInspector => {
                 // Go back to file browser
                 if self.dir_entries.is_empty() {
@@ -318,26 +396,59 @@ impl App {
     }
 
     fn switch_tab(&mut self) {
-        self.inspector_scroll = 0;
-        self.inspector_tab = match self.inspector_tab {
-            InspectorTab::Schema => InspectorTab::Preview,
-            InspectorTab::Preview => InspectorTab::Schema,
-        };
+        match self.current_screen {
+            Screen::JsonInspector => {
+                self.json_scroll = 0;
+                self.json_tab = match self.json_tab {
+                    JsonInspectorTab::Tree => JsonInspectorTab::Raw,
+                    JsonInspectorTab::Raw => JsonInspectorTab::Tree,
+                };
+            }
+            _ => {
+                self.inspector_scroll = 0;
+                self.inspector_tab = match self.inspector_tab {
+                    InspectorTab::Schema => InspectorTab::Preview,
+                    InspectorTab::Preview => InspectorTab::Schema,
+                };
+            }
+        }
     }
 
     fn scroll_up(&mut self) {
-        if self.inspector_scroll > 0 {
-            self.inspector_scroll -= 1;
+        match self.current_screen {
+            Screen::JsonInspector => {
+                if self.json_scroll > 0 {
+                    self.json_scroll -= 1;
+                }
+            }
+            _ => {
+                if self.inspector_scroll > 0 {
+                    self.inspector_scroll -= 1;
+                }
+            }
         }
     }
 
     fn scroll_down(&mut self) {
-        let max = match self.inspector_tab {
-            InspectorTab::Schema => self.inspector_schema.len(),
-            InspectorTab::Preview => self.inspector_preview_data.len(),
-        };
-        if self.inspector_scroll + 1 < max {
-            self.inspector_scroll += 1;
+        match self.current_screen {
+            Screen::JsonInspector => {
+                let max = match self.geo_tab {
+                    GeoJsonTab::Features => self.json_features_data.len(),
+                    _ => self.json_tree_nodes.len(),
+                };
+                if self.json_scroll + 1 < max {
+                    self.json_scroll += 1;
+                }
+            }
+            _ => {
+                let max = match self.inspector_tab {
+                    InspectorTab::Schema => self.inspector_schema.len(),
+                    InspectorTab::Preview => self.inspector_preview_data.len(),
+                };
+                if self.inspector_scroll + 1 < max {
+                    self.inspector_scroll += 1;
+                }
+            }
         }
     }
 
@@ -391,7 +502,68 @@ impl App {
             Screen::Home => views::home::render(frame, self),
             Screen::FileBrowser => views::file_browser::render(frame, self),
             Screen::DataInspector => views::data_inspector::render(frame, self),
+            Screen::JsonInspector => views::json_inspector::render(frame, self),
         }
+    }
+
+    pub fn load_json_data(&mut self, path: &Path) -> anyhow::Result<()> {
+        use crate::commands::JsonInspector;
+        use crate::tui::tree::build_tree;
+
+        let inspector = JsonInspector::new(path)?;
+        self.json_raw = serde_json::to_string_pretty(&inspector.root)?;
+        self.json_kind = Some(inspector.kind.clone());
+        self.json_collapsed = std::collections::HashSet::new();
+        self.json_tree_nodes = build_tree(&inspector.root, &self.json_collapsed);
+
+        if inspector.kind == crate::commands::json_inspector::FileKind::GeoJson {
+            let (count, types, bbox) = inspector.geojson_summary();
+            self.json_geosummary = Some((count, types, bbox));
+            let (headers, rows) = inspector.features_table();
+            self.json_features_headers = headers;
+            self.json_features_data = rows;
+            self.geo_tab = GeoJsonTab::Summary;
+        } else {
+            self.json_tab = JsonInspectorTab::Tree;
+            self.json_geosummary = None;
+            self.json_features_headers = vec![];
+            self.json_features_data = vec![];
+        }
+
+        self.json_root = Some(inspector.root);
+        self.json_scroll = 0;
+        self.json_file = Some(path.to_path_buf());
+        Ok(())
+    }
+
+    fn toggle_tree_node(&mut self) {
+        if let Some((path, node)) = self.json_tree_nodes.get(self.json_scroll) {
+            use crate::tui::tree::NodeKind;
+            match &node.kind {
+                NodeKind::Object | NodeKind::Array => {
+                    let path = path.clone();
+                    if self.json_collapsed.contains(&path) {
+                        self.json_collapsed.remove(&path);
+                    } else {
+                        self.json_collapsed.insert(path);
+                    }
+                    if let Some(ref root) = self.json_root.clone() {
+                        self.json_tree_nodes =
+                            crate::tui::tree::build_tree(root, &self.json_collapsed);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn switch_geo_tab(&mut self) {
+        self.json_scroll = 0;
+        self.geo_tab = match self.geo_tab {
+            GeoJsonTab::Summary => GeoJsonTab::Features,
+            GeoJsonTab::Features => GeoJsonTab::Tree,
+            GeoJsonTab::Tree => GeoJsonTab::Summary,
+        };
     }
 
     fn load_dir_entries(&mut self) -> anyhow::Result<()> {

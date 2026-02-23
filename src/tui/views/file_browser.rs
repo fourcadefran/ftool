@@ -86,7 +86,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                     .extension()
                     .and_then(|e| e.to_str())
                 {
-                    Some("csv") | Some("parquet") => Style::default().fg(Color::Green),
+                    Some("csv") | Some("parquet") | Some("json") | Some("geojson") => Style::default().fg(Color::Green),
                     _ => Style::default(),
                 }
             };
@@ -168,7 +168,7 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
                 ]),
             ];
 
-            if ext == "csv" || ext == "parquet" {
+            if ext == "csv" || ext == "parquet" || ext == "json" || ext == "geojson" {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Press Enter to inspect",
