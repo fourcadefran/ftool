@@ -3,6 +3,7 @@ mod event;
 mod terminal;
 mod views;
 mod widgets;
+pub mod tree;
 
 use app::App;
 use std::path::PathBuf;

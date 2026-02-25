@@ -1,6 +1,7 @@
 pub mod data_inspector;
 pub mod file_browser;
 pub mod home;
+pub mod json_inspector;
 
 use ratatui::layout::Rect;
 
