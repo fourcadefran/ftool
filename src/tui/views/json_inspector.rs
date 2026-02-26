@@ -54,9 +54,11 @@ pub fn render(frame: &mut Frame, app: &App) {
             ("Tab", "next tab"),
             ("\u{2191}\u{2193}", "scroll"),
             ("Enter", "expand/collapse"),
+            ("c", "to pmtiles"),
             ("Esc", "back"),
             ("q", "quit"),
         ]);
+        super::render_pmtiles_popup(frame, app, area);
     } else {
         render_json_tabs(frame, app, inner_chunks[0]);
         match app.json_tab {

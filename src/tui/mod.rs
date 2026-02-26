@@ -18,6 +18,10 @@ pub fn run(path: Option<String>) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| app.view(frame))?;
 
+        // Check if a background tippecanoe conversion has finished
+        let conversion_msg = app.poll_conversion();
+        app.update(conversion_msg);
+
         if let Some(ev) = event::poll_event()? {
             let msg = app.handle_event(ev);
             app.update(msg);

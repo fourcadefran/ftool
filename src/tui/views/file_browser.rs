@@ -45,10 +45,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         &[
             ("\u{2191}\u{2193}", "navigate"),
             ("Enter", "open"),
+            ("c", "to pmtiles"),
             ("Esc", "back"),
             ("q", "quit"),
         ],
     );
+
+    super::render_pmtiles_popup(frame, app, area);
 }
 
 fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -86,7 +89,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                     .extension()
                     .and_then(|e| e.to_str())
                 {
-                    Some("csv") | Some("parquet") | Some("json") | Some("geojson") => Style::default().fg(Color::Green),
+                    Some("csv") | Some("parquet") | Some("json") | Some("geojson") | Some("fgb") | Some("gpkg") => Style::default().fg(Color::Green),
                     _ => Style::default(),
                 }
             };
@@ -173,6 +176,13 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
                 lines.push(Line::from(Span::styled(
                     "Press Enter to inspect",
                     Style::default().fg(Color::Green),
+                )));
+            }
+            if ext == "fgb" || ext == "gpkg" || ext == "geojson" {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Press c to convert to PMTiles",
+                    Style::default().fg(Color::Yellow),
                 )));
             }
 

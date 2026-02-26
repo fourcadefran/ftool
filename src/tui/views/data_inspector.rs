@@ -264,5 +264,6 @@ fn render_popup(frame: &mut Frame, app: &App, area: Rect) {
             ];
             frame.render_widget(Paragraph::new(text), inner);
         }
+        Popup::PmtilesConfig { .. } => {}
     }
 }

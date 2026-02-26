@@ -39,6 +39,13 @@ pub enum Popup {
     None,
     ConvertConfirm { target_format: String },
     Message { title: String, body: String },
+    PmtilesConfig {
+        source_file: PathBuf,
+        config: crate::commands::tippecanoe::TippecanoeConfig,
+        preset: crate::commands::tippecanoe::Preset,
+        /// 0=preset, 1=min_zoom, 2=max_zoom, 3=no_feature_limit, 4=no_tile_size_limit, 5=drop_densest
+        selected_field: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -56,6 +63,12 @@ pub enum Message {
     ClosePopup,
     ToggleTreeNode,
     SwitchGeoTab,
+    ConvertToPmtiles,
+    PmtilesFieldUp,
+    PmtilesFieldDown,
+    PmtilesFieldLeft,
+    PmtilesFieldRight,
+    ConfirmPmtiles,
     Noop,
 }
 
@@ -70,6 +83,8 @@ pub struct DirEntryInfo {
 pub struct App {
     pub should_quit: bool,
     pub current_screen: Screen,
+    // Tippecanoe availability (checked once at startup)
+    pub tippecanoe_available: bool,
     // Home
     pub home_selected: usize,
     // File browser
@@ -110,6 +125,7 @@ impl App {
         let mut app = Self {
             should_quit: false,
             current_screen: Screen::Home,
+            tippecanoe_available: crate::commands::tippecanoe::check_tippecanoe_installed(),
             home_selected: 0,
             current_dir: std::env::current_dir()?,
             dir_entries: Vec::new(),
@@ -204,6 +220,17 @@ impl App {
                     _ => Message::Noop,
                 };
             }
+            Popup::PmtilesConfig { .. } => {
+                return match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => Message::PmtilesFieldUp,
+                    KeyCode::Down | KeyCode::Char('j') => Message::PmtilesFieldDown,
+                    KeyCode::Left | KeyCode::Char('h') => Message::PmtilesFieldLeft,
+                    KeyCode::Right | KeyCode::Char('l') => Message::PmtilesFieldRight,
+                    KeyCode::Enter => Message::ConfirmPmtiles,
+                    KeyCode::Esc => Message::ClosePopup,
+                    _ => Message::Noop,
+                };
+            }
             Popup::None => {}
         }
 
@@ -227,6 +254,7 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => Message::NavigateUp,
                 KeyCode::Down | KeyCode::Char('j') => Message::NavigateDown,
                 KeyCode::Enter => Message::Enter,
+                KeyCode::Char('c') => Message::ConvertToPmtiles,
                 KeyCode::Esc => Message::Back,
                 _ => Message::Noop,
             },
@@ -249,6 +277,13 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => Message::ScrollUp,
                 KeyCode::Down | KeyCode::Char('j') => Message::ScrollDown,
                 KeyCode::Enter => Message::ToggleTreeNode,
+                KeyCode::Char('c') => {
+                    if self.json_kind == Some(crate::commands::json_inspector::FileKind::GeoJson) {
+                        Message::ConvertToPmtiles
+                    } else {
+                        Message::Noop
+                    }
+                }
                 KeyCode::Esc => Message::Back,
                 _ => Message::Noop,
             },
@@ -270,6 +305,12 @@ impl App {
             Message::ClosePopup => self.popup = Popup::None,
             Message::ToggleTreeNode => self.toggle_tree_node(),
             Message::SwitchGeoTab => self.switch_geo_tab(),
+            Message::ConvertToPmtiles => self.convert_to_pmtiles(),
+            Message::PmtilesFieldUp => self.pmtiles_field_up(),
+            Message::PmtilesFieldDown => self.pmtiles_field_down(),
+            Message::PmtilesFieldLeft => self.pmtiles_adjust(-1),
+            Message::PmtilesFieldRight => self.pmtiles_adjust(1),
+            Message::ConfirmPmtiles => self.confirm_pmtiles(),
             Message::Noop => {}
         }
     }
@@ -649,5 +690,122 @@ impl App {
         self.inspector_tab = InspectorTab::Schema;
 
         Ok(())
+    }
+
+    fn convert_to_pmtiles(&mut self) {
+        if !self.tippecanoe_available {
+            self.popup = Popup::Message {
+                title: "Error".to_string(),
+                body: "tippecanoe is not installed or not in PATH".to_string(),
+            };
+            return;
+        }
+
+        let source = match self.current_screen {
+            Screen::JsonInspector => self.json_file.clone(),
+            Screen::FileBrowser => {
+                self.dir_entries
+                    .get(self.browser_selected)
+                    .and_then(|e| {
+                        let ext = e.path.extension()?.to_str()?;
+                        if matches!(ext, "fgb" | "gpkg" | "geojson") {
+                            Some(e.path.clone())
+                        } else {
+                            None
+                        }
+                    })
+            }
+            _ => None,
+        };
+
+        let Some(source) = source else {
+            return;
+        };
+
+        self.popup = Popup::PmtilesConfig {
+            source_file: source,
+            config: crate::commands::tippecanoe::TippecanoeConfig::default(),
+            preset: crate::commands::tippecanoe::Preset::Custom,
+            selected_field: 0,
+        };
+    }
+
+    fn pmtiles_field_up(&mut self) {
+        if let Popup::PmtilesConfig { ref mut selected_field, .. } = self.popup {
+            if *selected_field > 0 {
+                *selected_field -= 1;
+            }
+        }
+    }
+
+    fn pmtiles_field_down(&mut self) {
+        if let Popup::PmtilesConfig { ref mut selected_field, .. } = self.popup {
+            if *selected_field < 5 {
+                *selected_field += 1;
+            }
+        }
+    }
+
+    fn pmtiles_adjust(&mut self, direction: i8) {
+        use crate::commands::tippecanoe::Preset;
+        const PRESETS: [Preset; 4] = [Preset::Custom, Preset::Generic, Preset::Parcels, Preset::Points];
+
+        if let Popup::PmtilesConfig { ref mut config, ref mut preset, selected_field, .. } = self.popup {
+            match selected_field {
+                0 => {
+                    let idx = PRESETS.iter().position(|p| p == preset).unwrap_or(0);
+                    let new_idx = (idx as i8 + direction).rem_euclid(PRESETS.len() as i8) as usize;
+                    *preset = PRESETS[new_idx];
+                    config.apply_preset(*preset);
+                }
+                1 => {
+                    *preset = Preset::Custom;
+                    config.min_zoom = (config.min_zoom as i8 + direction).clamp(0, 30) as u8;
+                }
+                2 => {
+                    *preset = Preset::Custom;
+                    config.max_zoom = (config.max_zoom as i8 + direction).clamp(0, 30) as u8;
+                }
+                3 => { config.no_feature_limit = !config.no_feature_limit; }
+                4 => { config.no_tile_size_limit = !config.no_tile_size_limit; }
+                5 => { config.drop_densest_as_needed = !config.drop_densest_as_needed; }
+                _ => {}
+            }
+        }
+    }
+
+    fn confirm_pmtiles(&mut self) {
+        let (source, config) = match &self.popup {
+            Popup::PmtilesConfig { source_file, config, .. } => {
+                (source_file.clone(), config.clone())
+            }
+            _ => return,
+        };
+
+        if config.min_zoom > config.max_zoom {
+            self.popup = Popup::Message {
+                title: "Invalid zoom range".to_string(),
+                body: format!(
+                    "Min zoom ({}) must be ≤ max zoom ({})",
+                    config.min_zoom, config.max_zoom
+                ),
+            };
+            return;
+        }
+
+        match crate::commands::tippecanoe::run_tippecanoe(&source, &config) {
+            Ok(output_path) => {
+                self.popup = Popup::Message {
+                    title: "Success".to_string(),
+                    body: format!("Created:\n{}", output_path),
+                };
+            }
+            Err(e) => {
+                self.popup = Popup::Message {
+                    title: "Error".to_string(),
+                    body: e,
+                };
+            }
+        }
     }
 }
