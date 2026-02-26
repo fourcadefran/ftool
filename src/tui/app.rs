@@ -46,6 +46,7 @@ pub enum Popup {
         /// 0=preset, 1=min_zoom, 2=max_zoom, 3=no_feature_limit, 4=no_tile_size_limit, 5=drop_densest
         selected_field: usize,
     },
+    Converting { filename: String },
 }
 
 #[derive(Debug)]
@@ -69,6 +70,7 @@ pub enum Message {
     PmtilesFieldLeft,
     PmtilesFieldRight,
     ConfirmPmtiles,
+    PmtilesDone(Result<String, String>),
     Noop,
 }
 
@@ -105,6 +107,8 @@ pub struct App {
     pub inspector_scroll: usize,
     // Popup
     pub popup: Popup,
+    // Background tippecanoe conversion channel
+    pub conversion_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     // Json inspector
     pub json_file: Option<PathBuf>,
     pub json_root: Option<serde_json::Value>,
@@ -142,6 +146,7 @@ impl App {
             inspector_row_count: 0,
             inspector_scroll: 0,
             popup: Popup::None,
+            conversion_rx: None,
             json_file: None,
             json_root: None,
             json_kind: None,
@@ -231,6 +236,10 @@ impl App {
                     _ => Message::Noop,
                 };
             }
+            Popup::Converting { .. } => {
+                // Block all input while conversion is running
+                return Message::Noop;
+            }
             Popup::None => {}
         }
 
@@ -311,6 +320,7 @@ impl App {
             Message::PmtilesFieldLeft => self.pmtiles_adjust(-1),
             Message::PmtilesFieldRight => self.pmtiles_adjust(1),
             Message::ConfirmPmtiles => self.confirm_pmtiles(),
+            Message::PmtilesDone(result) => self.pmtiles_done(result),
             Message::Noop => {}
         }
     }
@@ -793,7 +803,24 @@ impl App {
             return;
         }
 
-        match crate::commands::tippecanoe::run_tippecanoe(&source, &config) {
+        let filename = source
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = crate::commands::tippecanoe::run_tippecanoe(&source, &config);
+            let _ = tx.send(result);
+        });
+
+        self.conversion_rx = Some(rx);
+        self.popup = Popup::Converting { filename };
+    }
+
+    fn pmtiles_done(&mut self, result: Result<String, String>) {
+        self.conversion_rx = None;
+        match result {
             Ok(output_path) => {
                 self.popup = Popup::Message {
                     title: "Success".to_string(),
@@ -806,6 +833,19 @@ impl App {
                     body: e,
                 };
             }
+        }
+    }
+
+    /// Poll the background conversion channel. Returns a PmtilesDone message
+    /// if the conversion has finished, Noop otherwise.
+    pub fn poll_conversion(&self) -> Message {
+        if let Some(ref rx) = self.conversion_rx {
+            match rx.try_recv() {
+                Ok(result) => Message::PmtilesDone(result),
+                Err(_) => Message::Noop,
+            }
+        } else {
+            Message::Noop
         }
     }
 }

@@ -17,9 +17,35 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-/// Renders the tippecanoe PMTiles configuration popup.
+/// Renders the tippecanoe PMTiles configuration popup, or the "Converting…" spinner popup.
 /// Call this at the end of any view's `render()` that can trigger the popup.
 pub fn render_pmtiles_popup(frame: &mut Frame, app: &App, area: Rect) {
+    // Show a "Converting…" popup while the background thread is running
+    if let Popup::Converting { filename } = &app.popup {
+        let popup_area = centered_rect(50, 5, area);
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" Converting ")
+            .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        let text = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  Converting "),
+                Span::styled(filename.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::raw(" → .pmtiles…"),
+            ]),
+        ];
+        frame.render_widget(Paragraph::new(text), inner);
+        return;
+    }
+
     let Popup::PmtilesConfig { source_file, config, preset, selected_field } = &app.popup else {
         return;
     };
