@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, Tabs};
@@ -13,11 +13,12 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([Constraint::Min(0), Constraint::Length(1), Constraint::Length(1)])
         .split(area);
 
     let main_area = chunks[0];
-    let status_area = chunks[1];
+    let info_area = chunks[1];
+    let status_area = chunks[2];
 
     // Title with file name and row count
     let title = if let Some(ref file) = app.inspector_file {
@@ -71,18 +72,39 @@ pub fn render(frame: &mut Frame, app: &App) {
         InspectorTab::Preview => render_preview(frame, app, inner_chunks[1]),
     }
 
+    // Info bar (only in Preview tab)
+    if app.inspector_tab == InspectorTab::Preview {
+        const PAGE_SIZE: usize = 50;
+        let from = app.inspector_page * PAGE_SIZE + 1;
+        let to = ((app.inspector_page + 1) * PAGE_SIZE).min(app.inspector_row_count);
+        let total_pages = (app.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
+
+        let left = Paragraph::new(format!(" showing {} to {} of {} ", from, to, app.inspector_row_count))
+            .style(Style::default().fg(Color::DarkGray));
+        let right = Paragraph::new(format!(" page {} of {} ", app.inspector_page + 1, total_pages))
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Right);
+
+        frame.render_widget(left, info_area);
+        frame.render_widget(right, info_area);
+    }
+
     // Status bar
-    status_bar::render(
-        frame,
-        status_area,
-        &[
-            ("Tab", "switch"),
-            ("\u{2191}\u{2193}", "scroll"),
-            ("c", "convert"),
-            ("Esc", "back"),
-            ("q", "quit"),
-        ],
-    );
+    let mut hints: Vec<(&str, &str)> = vec![
+        ("Tab", "Switch"),
+        ("\u{2191}\u{2193}", "Scroll"),
+    ];
+    if app.inspector_tab == InspectorTab::Preview {
+        hints.push(("\u{2190}", "Previous page"));
+        hints.push(("\u{2192}", "Next page"));
+    }
+    hints.extend_from_slice(&[
+        ("c", "Convert"),
+        ("Esc", "Back"),
+        ("q", "Quit")
+    ]);
+
+    status_bar::render(frame, status_area, &hints);
 
     // Render popup on top if active
     render_popup(frame, app, frame.area());

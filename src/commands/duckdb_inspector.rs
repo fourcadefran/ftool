@@ -294,7 +294,7 @@ impl DuckDbInspector {
     }
 
     /// Returns a preview of the first N rows as (headers, rows_of_strings)
-    pub fn preview(&self, limit: usize) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
+    pub fn preview(&self, limit: usize, offset: usize) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
         let schema = self.schema()?;
         let headers: Vec<String> = schema.iter().map(|(name, _)| name.clone()).collect();
 
@@ -317,11 +317,12 @@ impl DuckDbInspector {
             .collect();
 
         let query = format!(
-            "SELECT {} FROM {}('{}') LIMIT {}",
+            "SELECT {} FROM {}('{}') LIMIT {} OFFSET {}",
             columns.join(", "),
             read_function,
             escaped_path,
-            limit
+            limit,
+            offset
         );
 
         let mut stmt = self.connection.prepare(&query).map_err(|e| {

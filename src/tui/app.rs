@@ -2,7 +2,6 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-
 use crate::commands::DuckDbInspector;
 
 use super::views;
@@ -57,6 +56,8 @@ pub enum Message {
     ToggleTreeNode,
     SwitchGeoTab,
     Noop,
+    NextPage,
+    PrevPage,
 }
 
 pub struct DirEntryInfo {
@@ -88,6 +89,7 @@ pub struct App {
     pub inspector_preview_data: Vec<Vec<String>>,
     pub inspector_row_count: usize,
     pub inspector_scroll: usize,
+    pub inspector_page: usize,
     // Popup
     pub popup: Popup,
     // Json inspector
@@ -125,6 +127,7 @@ impl App {
             inspector_preview_data: Vec::new(),
             inspector_row_count: 0,
             inspector_scroll: 0,
+            inspector_page: 0,
             popup: Popup::None,
             json_file: None,
             json_root: None,
@@ -236,6 +239,8 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => Message::ScrollDown,
                 KeyCode::Char('c') => Message::ConvertFile,
                 KeyCode::Esc => Message::Back,
+                KeyCode::Right => Message::NextPage,
+                KeyCode::Left => Message::PrevPage,
                 _ => Message::Noop,
             },
             Screen::JsonInspector => match key.code {
@@ -270,6 +275,8 @@ impl App {
             Message::ClosePopup => self.popup = Popup::None,
             Message::ToggleTreeNode => self.toggle_tree_node(),
             Message::SwitchGeoTab => self.switch_geo_tab(),
+            Message::NextPage => self.next_page(),
+            Message::PrevPage => self.prev_page(),
             Message::Noop => {}
         }
     }
@@ -447,6 +454,55 @@ impl App {
                 };
                 if self.inspector_scroll + 1 < max {
                     self.inspector_scroll += 1;
+                }
+            }
+        }
+    }
+
+    fn next_page(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        const PAGE_SIZE: usize = 50;
+        let total_pages = (self.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
+        if self.inspector_page + 1 < total_pages {
+            self.inspector_page += 1;
+            self.load_preview_page();
+        }
+    }
+
+    fn prev_page(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        if self.inspector_page > 0 {
+            self.inspector_page -= 1;
+            self.load_preview_page();
+        }
+    }
+
+    fn load_preview_page(&mut self) {
+        let file = match self.inspector_file.clone() {
+            Some(f) => f.to_string_lossy().to_string(),
+            None => return,
+        };
+        match DuckDbInspector::new(file) {
+            Ok(inspector) => match inspector.preview(50, self.inspector_page * 50) {
+                Ok((headers, data)) => {
+                    self.inspector_preview_headers = headers;
+                    self.inspector_preview_data = data;
+                    self.inspector_scroll = 0;
+                }
+                Err(e) => {
+                    self.popup = Popup::Message {
+                        title: "Error".to_string(),
+                        body: e.to_string(),
+                    };
+                }
+            }, Err(e) => {
+                self.popup = Popup::Message {
+                    title: "Error".to_string(),
+                    body: e.to_string(),
                 }
             }
         }
@@ -641,11 +697,12 @@ impl App {
         }
 
         // Preview data
-        let (headers, data) = inspector.preview(50)?;
+        let (headers, data) = inspector.preview(50, self.inspector_page * 50)?;
         self.inspector_preview_headers = headers;
         self.inspector_preview_data = data;
 
         self.inspector_scroll = 0;
+        self.inspector_page = 0;
         self.inspector_tab = InspectorTab::Schema;
 
         Ok(())
