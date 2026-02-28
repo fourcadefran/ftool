@@ -25,7 +25,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_default();
-        format!(" Inspector: {} ({} rows) ", name, app.inspector_row_count)
+        format!(" Inspector: {} ({} rows) ({} page)", name, app.inspector_row_count, app.inspector_page)
     } else {
         " Inspector ".to_string()
     };
@@ -72,17 +72,21 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     // Status bar
-    status_bar::render(
-        frame,
-        status_area,
-        &[
-            ("Tab", "switch"),
-            ("\u{2191}\u{2193}", "scroll"),
-            ("c", "convert"),
-            ("Esc", "back"),
-            ("q", "quit"),
-        ],
-    );
+    let mut hints: Vec<(&str, &str)> = vec![
+        ("Tab", "Switch"),
+        ("\u{2191}\u{2193}", "Scroll"),
+    ];
+    if app.inspector_tab == InspectorTab::Preview {
+        hints.push(("\u{2190}", "Previous page"));
+        hints.push(("\u{2192}", "Next page"));
+    }
+    hints.extend_from_slice(&[
+        ("c", "Convert"),
+        ("Esc", "Back"),
+        ("q", "Quit")
+    ]);
+
+    status_bar::render(frame, status_area, &hints);
 
     // Render popup on top if active
     render_popup(frame, app, frame.area());
