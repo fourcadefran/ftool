@@ -2,7 +2,6 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::Frame;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use crate::commands::duckdb_inspector::DuckDbError;
 use crate::commands::DuckDbInspector;
 
 use super::views;
