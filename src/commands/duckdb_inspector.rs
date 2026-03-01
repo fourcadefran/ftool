@@ -150,6 +150,11 @@ impl DuckDbInspector {
 
     /// Returns the number of rows in the file (CSV or Parquet)
     pub fn row_count(&self) -> Result<usize, DuckDbError> {
+        self.row_count_filtered("")
+    }
+
+    /// Returns the number of rows matching an optional WHERE clause
+    pub fn row_count_filtered(&self, where_clause: &str) -> Result<usize, DuckDbError> {
         let path = Path::new(&self.file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
@@ -160,9 +165,10 @@ impl DuckDbInspector {
         };
 
         let query = format!(
-            "SELECT COUNT(*) FROM {}('{}')",
+            "SELECT COUNT(*) FROM {}('{}') {}",
             read_function,
-            self.file_path.replace('\'', "''")
+            self.file_path.replace('\'', "''"),
+            where_clause,
         );
 
         self.connection
@@ -293,8 +299,8 @@ impl DuckDbInspector {
             })
     }
 
-    /// Returns a preview of the first N rows as (headers, rows_of_strings)
-    pub fn preview(&self, limit: usize, offset: usize) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
+    /// Returns a preview of rows as (headers, rows_of_strings), with optional WHERE clause
+    pub fn preview(&self, limit: usize, offset: usize, where_clause: &str) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
         let schema = self.schema()?;
         let headers: Vec<String> = schema.iter().map(|(name, _)| name.clone()).collect();
 
@@ -317,10 +323,11 @@ impl DuckDbInspector {
             .collect();
 
         let query = format!(
-            "SELECT {} FROM {}('{}') LIMIT {} OFFSET {}",
+            "SELECT {} FROM {}('{}') {} LIMIT {} OFFSET {}",
             columns.join(", "),
             read_function,
             escaped_path,
+            where_clause,
             limit,
             offset
         );
