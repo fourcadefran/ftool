@@ -33,11 +33,41 @@ pub enum GeoJsonTab {
     Tree,
 }
 
+pub const FILTER_OPERATORS: &[&str] = &[
+    "=", "!=", ">", "<", ">=", "<=", "LIKE", "IS NULL", "IS NOT NULL",
+];
+
+pub const PAGE_SIZE: usize = 50;
+
+#[derive(Debug, Clone)]
+pub struct FilterCondition {
+    pub column: String,
+    pub operator: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterField {
+    Column,
+    Operator,
+    Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct FilterEditorState {
+    pub conditions: Vec<FilterCondition>,
+    pub column_idx: usize,
+    pub operator_idx: usize,
+    pub value_input: String,
+    pub active_field: FilterField,
+}
+
 #[derive(Debug, Clone)]
 pub enum Popup {
     None,
     ConvertConfirm { target_format: String },
     Message { title: String, body: String },
+    FilterEditor(FilterEditorState),
 }
 
 #[derive(Debug)]
@@ -58,6 +88,15 @@ pub enum Message {
     Noop,
     NextPage,
     PrevPage,
+    OpenFilterPopup,
+    FilterTabNext,
+    FilterNavUp,
+    FilterNavDown,
+    FilterChar(char),
+    FilterBackspace,
+    FilterAddCondition,
+    FilterRemoveLast,
+    FilterApply,
 }
 
 pub struct DirEntryInfo {
@@ -90,6 +129,7 @@ pub struct App {
     pub inspector_row_count: usize,
     pub inspector_scroll: usize,
     pub inspector_page: usize,
+    pub inspector_filters: Vec<FilterCondition>,
     // Popup
     pub popup: Popup,
     // Json inspector
@@ -128,6 +168,7 @@ impl App {
             inspector_row_count: 0,
             inspector_scroll: 0,
             inspector_page: 0,
+            inspector_filters: Vec::new(),
             popup: Popup::None,
             json_file: None,
             json_root: None,
@@ -207,6 +248,37 @@ impl App {
                     _ => Message::Noop,
                 };
             }
+            Popup::FilterEditor(state) => {
+                return match key.code {
+                    KeyCode::Esc => Message::ClosePopup,
+                    KeyCode::Tab => Message::FilterTabNext,
+                    KeyCode::Up => Message::FilterNavUp,
+                    KeyCode::Down => Message::FilterNavDown,
+                    KeyCode::Backspace => Message::FilterBackspace,
+                    KeyCode::Enter => {
+                        if state.active_field == FilterField::Value {
+                            if state.value_input.is_empty() {
+                                Message::FilterApply
+                            } else {
+                                Message::FilterAddCondition
+                            }
+                        } else {
+                            Message::FilterTabNext
+                        }
+                    }
+                    KeyCode::Char('d') if state.active_field != FilterField::Value => {
+                        Message::FilterRemoveLast
+                    }
+                    KeyCode::Char(c) => {
+                        if state.active_field == FilterField::Value {
+                            Message::FilterChar(c)
+                        } else {
+                            Message::Noop
+                        }
+                    }
+                    _ => Message::Noop,
+                };
+            }
             Popup::None => {}
         }
 
@@ -238,6 +310,7 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => Message::ScrollUp,
                 KeyCode::Down | KeyCode::Char('j') => Message::ScrollDown,
                 KeyCode::Char('c') => Message::ConvertFile,
+                KeyCode::Char('f') => Message::OpenFilterPopup,
                 KeyCode::Esc => Message::Back,
                 KeyCode::Right => Message::NextPage,
                 KeyCode::Left => Message::PrevPage,
@@ -277,6 +350,15 @@ impl App {
             Message::SwitchGeoTab => self.switch_geo_tab(),
             Message::NextPage => self.next_page(),
             Message::PrevPage => self.prev_page(),
+            Message::OpenFilterPopup => self.open_filter_popup(),
+            Message::FilterTabNext => self.filter_tab_next(),
+            Message::FilterNavUp => self.filter_nav_up(),
+            Message::FilterNavDown => self.filter_nav_down(),
+            Message::FilterChar(c) => self.filter_char(c),
+            Message::FilterBackspace => self.filter_backspace(),
+            Message::FilterAddCondition => self.filter_add_condition(),
+            Message::FilterRemoveLast => self.filter_remove_last(),
+            Message::FilterApply => self.filter_apply(),
             Message::Noop => {}
         }
     }
@@ -459,11 +541,17 @@ impl App {
         }
     }
 
+    fn show_error(&mut self, e: impl std::fmt::Display) {
+        self.popup = Popup::Message {
+            title: "Error".to_string(),
+            body: e.to_string(),
+        };
+    }
+
     fn next_page(&mut self) {
         if self.inspector_tab != InspectorTab::Preview {
             return;
         }
-        const PAGE_SIZE: usize = 50;
         let total_pages = (self.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
         if self.inspector_page + 1 < total_pages {
             self.inspector_page += 1;
@@ -482,30 +570,172 @@ impl App {
     }
 
     fn load_preview_page(&mut self) {
-        let file = match self.inspector_file.clone() {
+        let file = match &self.inspector_file {
             Some(f) => f.to_string_lossy().to_string(),
             None => return,
         };
+        let where_clause = Self::build_where_clause(&self.inspector_filters);
         match DuckDbInspector::new(file) {
-            Ok(inspector) => match inspector.preview(50, self.inspector_page * 50) {
+            Ok(inspector) => match inspector.preview(PAGE_SIZE, self.inspector_page * PAGE_SIZE, &where_clause) {
                 Ok((headers, data)) => {
                     self.inspector_preview_headers = headers;
                     self.inspector_preview_data = data;
                     self.inspector_scroll = 0;
                 }
-                Err(e) => {
-                    self.popup = Popup::Message {
-                        title: "Error".to_string(),
-                        body: e.to_string(),
-                    };
+                Err(e) => self.show_error(e),
+            },
+            Err(e) => self.show_error(e),
+        }
+    }
+
+    fn open_filter_popup(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        self.popup = Popup::FilterEditor(FilterEditorState {
+            conditions: self.inspector_filters.clone(),
+            column_idx: 0,
+            operator_idx: 0,
+            value_input: String::new(),
+            active_field: FilterField::Column,
+        });
+    }
+
+    fn filter_tab_next(&mut self) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            let op = FILTER_OPERATORS[state.operator_idx];
+            state.active_field = match state.active_field {
+                FilterField::Column => FilterField::Operator,
+                FilterField::Operator => {
+                    if op == "IS NULL" || op == "IS NOT NULL" {
+                        FilterField::Column
+                    } else {
+                        FilterField::Value
+                    }
                 }
-            }, Err(e) => {
-                self.popup = Popup::Message {
-                    title: "Error".to_string(),
-                    body: e.to_string(),
+                FilterField::Value => FilterField::Column,
+            };
+        }
+    }
+
+    fn filter_nav_up(&mut self) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            match state.active_field {
+                FilterField::Column => {
+                    if state.column_idx > 0 {
+                        state.column_idx -= 1;
+                    }
                 }
+                FilterField::Operator => {
+                    if state.operator_idx > 0 {
+                        state.operator_idx -= 1;
+                    }
+                }
+                FilterField::Value => {}
             }
         }
+    }
+
+    fn filter_nav_down(&mut self) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            match state.active_field {
+                FilterField::Column => {
+                    if state.column_idx + 1 < self.inspector_schema.len() {
+                        state.column_idx += 1;
+                    }
+                }
+                FilterField::Operator => {
+                    if state.operator_idx + 1 < FILTER_OPERATORS.len() {
+                        state.operator_idx += 1;
+                    }
+                }
+                FilterField::Value => {}
+            }
+        }
+    }
+
+    fn filter_char(&mut self, c: char) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            state.value_input.push(c);
+        }
+    }
+
+    fn filter_backspace(&mut self) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            state.value_input.pop();
+        }
+    }
+
+    fn filter_add_condition(&mut self) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            if let Some((col_name, _)) = self.inspector_schema.get(state.column_idx) {
+                let op = FILTER_OPERATORS[state.operator_idx];
+                state.conditions.push(FilterCondition {
+                    column: col_name.clone(),
+                    operator: op.to_string(),
+                    value: state.value_input.clone(),
+                });
+                state.value_input.clear();
+                state.active_field = FilterField::Column;
+            }
+        }
+    }
+
+    fn filter_remove_last(&mut self) {
+        if let Popup::FilterEditor(ref mut state) = self.popup {
+            state.conditions.pop();
+        }
+    }
+
+    fn filter_apply(&mut self) {
+        let conditions = if let Popup::FilterEditor(ref state) = self.popup {
+            state.conditions.clone()
+        } else {
+            return;
+        };
+        self.inspector_filters = conditions;
+        self.inspector_page = 0;
+        self.inspector_scroll = 0;
+        self.popup = Popup::None;
+
+        let file = match &self.inspector_file {
+            Some(f) => f.to_string_lossy().to_string(),
+            None => return,
+        };
+        let where_clause = Self::build_where_clause(&self.inspector_filters);
+        match DuckDbInspector::new(file) {
+            Ok(inspector) => {
+                match inspector.row_count_filtered(&where_clause) {
+                    Ok(count) => self.inspector_row_count = count,
+                    Err(e) => { self.show_error(e); return; }
+                }
+                match inspector.preview(PAGE_SIZE, 0, &where_clause) {
+                    Ok((headers, data)) => {
+                        self.inspector_preview_headers = headers;
+                        self.inspector_preview_data = data;
+                    }
+                    Err(e) => self.show_error(e),
+                }
+            }
+            Err(e) => self.show_error(e),
+        }
+    }
+
+    fn build_where_clause(filters: &[FilterCondition]) -> String {
+        if filters.is_empty() {
+            return String::new();
+        }
+        let parts: Vec<String> = filters.iter().map(|f| {
+            let col = f.column.replace('"', "\"\"");
+            let v = f.value.replace('\'', "''");
+            match f.operator.as_str() {
+                "IS NULL"     => format!("\"{}\" IS NULL", col),
+                "IS NOT NULL" => format!("\"{}\" IS NOT NULL", col),
+                "LIKE"        => format!("\"{}\"::VARCHAR LIKE '%{}%'", col, v),
+                op            => format!("\"{}\" {} '{}'", col, op, v),
+            }
+        }).collect();
+        format!("WHERE {}", parts.join(" AND "))
     }
 
     fn convert_file(&mut self) {
@@ -537,19 +767,9 @@ impl App {
                         body: format!("Converted to {}", path),
                     };
                 }
-                Err(e) => {
-                    self.popup = Popup::Message {
-                        title: "Error".to_string(),
-                        body: e.to_string(),
-                    };
-                }
+                Err(e) => self.show_error(e),
             },
-            Err(e) => {
-                self.popup = Popup::Message {
-                    title: "Error".to_string(),
-                    body: e.to_string(),
-                };
-            }
+            Err(e) => self.show_error(e),
         }
     }
 
@@ -697,12 +917,13 @@ impl App {
         }
 
         // Preview data
-        let (headers, data) = inspector.preview(50, self.inspector_page * 50)?;
+        let (headers, data) = inspector.preview(50, 0, "")?;
         self.inspector_preview_headers = headers;
         self.inspector_preview_data = data;
 
         self.inspector_scroll = 0;
         self.inspector_page = 0;
+        self.inspector_filters = Vec::new();
         self.inspector_tab = InspectorTab::Schema;
 
         Ok(())

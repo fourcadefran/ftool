@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, Tabs};
 
-use crate::tui::app::{App, InspectorTab, Popup};
+use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, PAGE_SIZE, Popup, FILTER_OPERATORS};
 use crate::tui::views::centered_rect;
 use crate::tui::widgets::status_bar;
 
@@ -74,10 +74,14 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // Info bar (only in Preview tab)
     if app.inspector_tab == InspectorTab::Preview {
-        const PAGE_SIZE: usize = 50;
         let from = app.inspector_page * PAGE_SIZE + 1;
         let to = ((app.inspector_page + 1) * PAGE_SIZE).min(app.inspector_row_count);
         let total_pages = (app.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
+
+        let info_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(33), Constraint::Percentage(34), Constraint::Percentage(33)])
+            .split(info_area);
 
         let left = Paragraph::new(format!(" showing {} to {} of {} ", from, to, app.inspector_row_count))
             .style(Style::default().fg(Color::DarkGray));
@@ -85,8 +89,17 @@ pub fn render(frame: &mut Frame, app: &App) {
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Right);
 
-        frame.render_widget(left, info_area);
-        frame.render_widget(right, info_area);
+        frame.render_widget(left, info_chunks[0]);
+        frame.render_widget(right, info_chunks[2]);
+
+        if !app.inspector_filters.is_empty() {
+            let n = app.inspector_filters.len();
+            let label = if n == 1 { "1 filter".to_string() } else { format!("{} filters", n) };
+            let center = Paragraph::new(format!(" {} active ", label))
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Center);
+            frame.render_widget(center, info_chunks[1]);
+        }
     }
 
     // Status bar
@@ -97,6 +110,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.inspector_tab == InspectorTab::Preview {
         hints.push(("\u{2190}", "Previous page"));
         hints.push(("\u{2192}", "Next page"));
+        hints.push(("f", "filter"));
     }
     hints.extend_from_slice(&[
         ("c", "Convert"),
@@ -286,5 +300,130 @@ fn render_popup(frame: &mut Frame, app: &App, area: Rect) {
             ];
             frame.render_widget(Paragraph::new(text), inner);
         }
+        Popup::FilterEditor(state) => render_filter_popup(frame, app, state, area),
     }
+}
+
+fn render_filter_popup(frame: &mut Frame, app: &App, state: &FilterEditorState, area: Rect) {
+    let width = 72_u16.min(area.width.saturating_sub(4));
+    let height = 16_u16.min(area.height.saturating_sub(2));
+    let popup_area = centered_rect(width, height, area);
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Filters ")
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),      // conditions list
+            Constraint::Length(1),   // separator
+            Constraint::Length(3),   // editor fields
+            Constraint::Length(1),   // help text
+        ])
+        .split(inner);
+
+    // --- Conditions list ---
+    let mut condition_lines: Vec<Line> = if state.conditions.is_empty() {
+        vec![Line::from(Span::styled(
+            "  (no filters — Tab to select fields, Enter to add)",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        state.conditions.iter().enumerate().map(|(i, c)| {
+            let text = if c.operator == "IS NULL" || c.operator == "IS NOT NULL" {
+                format!("  {}. \"{}\" {}", i + 1, c.column, c.operator)
+            } else {
+                format!("  {}. \"{}\" {} '{}'", i + 1, c.column, c.operator, c.value)
+            };
+            Line::from(Span::styled(text, Style::default().fg(Color::White)))
+        }).collect()
+    };
+    condition_lines.insert(0, Line::from(Span::styled(
+        " Active filters:",
+        Style::default().fg(Color::Gray),
+    )));
+    frame.render_widget(Paragraph::new(condition_lines), chunks[0]);
+
+    // --- Separator ---
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "─".repeat(inner.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )),
+        chunks[1],
+    );
+
+    // --- Editor fields ---
+    let active_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(Color::Gray);
+
+    let col_name = app.inspector_schema
+        .get(state.column_idx)
+        .map(|(name, _)| name.as_str())
+        .unwrap_or("-");
+    let op_name = FILTER_OPERATORS.get(state.operator_idx).copied().unwrap_or("=");
+    let value_display = format!("{}_", state.value_input);
+
+    let field_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1); 3])
+        .split(chunks[2]);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("  Column:   "),
+            Span::styled(
+                format!("[ {:<20} ]", col_name),
+                if state.active_field == FilterField::Column { active_style } else { inactive_style },
+            ),
+            Span::styled("  ↑↓ to change", Style::default().fg(Color::DarkGray)),
+        ])),
+        field_chunks[0],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("  Operator: "),
+            Span::styled(
+                format!("[ {:<20} ]", op_name),
+                if state.active_field == FilterField::Operator { active_style } else { inactive_style },
+            ),
+            Span::styled("  ↑↓ to change", Style::default().fg(Color::DarkGray)),
+        ])),
+        field_chunks[1],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw("  Value:    "),
+            Span::styled(
+                format!("[ {:<20} ]", value_display),
+                if state.active_field == FilterField::Value { active_style } else { inactive_style },
+            ),
+            Span::styled("  type to input", Style::default().fg(Color::DarkGray)),
+        ])),
+        field_chunks[2],
+    );
+
+    // --- Help text ---
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Tab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(":next  "),
+            Span::styled("Enter", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(":add/apply  "),
+            Span::styled("d", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(":remove last  "),
+            Span::styled("Esc", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(":cancel"),
+        ])),
+        chunks[3],
+    );
 }

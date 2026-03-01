@@ -1,6 +1,6 @@
 # ftool 🦀
 
-**ftool** is a modular command-line toolbox written in Rust. It combines classic Unix-style file utilities with modern data inspection features, and an interactive TUI for navigating the filesystem and inspecting CSV/Parquet datasets visually.
+**ftool** is a modular command-line toolbox written in Rust. It combines classic Unix-style file utilities with modern data inspection features, and an interactive TUI for navigating the filesystem and inspecting CSV/Parquet/JSON datasets visually.
 
 This project is primarily a **learning-oriented Rust CLI**, focused on writing idiomatic Rust while building real, useful tooling.
 
@@ -14,8 +14,25 @@ Built with **ratatui** — launch it by just running `ftool`:
 
 * Home menu with quick actions
 * File browser with directory navigation and file preview
-* Data inspector with Schema and Preview tabs
+* Data inspector for CSV and Parquet files with Schema and Preview tabs
+* JSON and GeoJSON inspector with Tree, Raw, and Features views
 * In-TUI file format conversion (CSV ↔ Parquet)
+
+### 📊 Data Inspector (CSV & Parquet)
+
+Powered by **DuckDB (embedded)**:
+
+* **Schema tab** — column names, types, null counts, min/max/avg statistics
+* **Preview tab** — paginated data view (50 rows per page) with left/right navigation
+* **Filters** — add multiple filter conditions (column / operator / value) with AND logic; 9 operators supported (`=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`)
+* Active filter count shown in the info bar when filters are applied
+* In-TUI format conversion (CSV ↔ Parquet)
+
+### 🗺 JSON & GeoJSON Inspector
+
+* **Tree view** — collapsible key/value tree for JSON objects and arrays
+* **Raw view** — pretty-printed JSON source
+* **GeoJSON** — dedicated Summary, Features, and Tree tabs; feature properties table
 
 ### 📂 File utilities
 
@@ -23,15 +40,6 @@ Built with **ratatui** — launch it by just running `ftool`:
 * File size
 * Line count
 * Preview file contents (`head`)
-
-### 🔍 Data inspection (Parquet & CSV)
-
-Powered by **DuckDB (embedded)**:
-
-* Inspect schema (column names + types)
-* Count total rows
-* Count NULL values per column
-* Convert between Parquet and CSV formats
 
 ### 📋 Todo manager *(coming soon)*
 
@@ -69,6 +77,8 @@ ftool tui ~/data
 # Open data inspector directly on a file
 ftool tui data.csv
 ftool tui data.parquet
+ftool tui data.json
+ftool tui data.geojson
 ```
 
 **TUI controls:**
@@ -82,9 +92,20 @@ ftool tui data.parquet
 | | `Enter` | Open directory / inspect file |
 | | `Esc` | Back to Home |
 | | `q` | Quit |
-| Data Inspector | `Tab` | Switch Schema / Preview |
+| Data Inspector | `Tab` | Switch Schema / Preview tabs |
 | | `↑↓` / `j k` | Scroll |
+| | `←` / `→` | Previous / next page (Preview tab) |
+| | `f` | Open filter editor (Preview tab) |
 | | `c` | Convert format (CSV ↔ Parquet) |
+| | `Esc` | Back to File Browser |
+| | `q` | Quit |
+| Filter Editor | `Tab` | Next field (Column → Operator → Value) |
+| | `↑↓` | Change selected column or operator |
+| | `Enter` | Add condition / apply filters |
+| | `d` | Remove last condition |
+| | `Esc` | Cancel |
+| JSON Inspector | `Tab` | Switch tabs |
+| | `↑↓` / `j k` | Scroll |
 | | `Esc` | Back to File Browser |
 | | `q` | Quit |
 
@@ -157,16 +178,18 @@ cargo install --path .
 * Working with embedded databases (DuckDB)
 * Building interactive TUIs with ratatui (TEA pattern)
 * Designing extensible command hierarchies
+* Parsing and rendering nested JSON/GeoJSON structures
+* Building dynamic SQL filters with safe identifier handling
 
 ---
 
 ## 🔮 Future ideas
 
-* Column statistics (min / max / avg)
-* JSON file inspector
 * Shell autocompletion
-* Query mode for complex data filtering
+* Query mode (free-form SQL on files)
 * Todo list in TUI
+* Recent files history
+* Export filtered results to CSV/JSON
 
 ---
 
