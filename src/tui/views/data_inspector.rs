@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, Tabs};
 
-use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, Popup, FILTER_OPERATORS};
+use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, PAGE_SIZE, Popup, FILTER_OPERATORS};
 use crate::tui::views::centered_rect;
 use crate::tui::widgets::status_bar;
 
@@ -74,7 +74,6 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     // Info bar (only in Preview tab)
     if app.inspector_tab == InspectorTab::Preview {
-        const PAGE_SIZE: usize = 50;
         let from = app.inspector_page * PAGE_SIZE + 1;
         let to = ((app.inspector_page + 1) * PAGE_SIZE).min(app.inspector_row_count);
         let total_pages = (app.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -95,7 +94,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
         if !app.inspector_filters.is_empty() {
             let n = app.inspector_filters.len();
-            let label = if n == 1 { "filter".to_string() } else { format!("{} filters", n) };
+            let label = if n == 1 { "1 filter".to_string() } else { format!("{} filters", n) };
             let center = Paragraph::new(format!(" {} active ", label))
                 .style(Style::default().fg(Color::Yellow))
                 .alignment(Alignment::Center);
