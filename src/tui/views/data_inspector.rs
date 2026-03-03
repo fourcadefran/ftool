@@ -332,7 +332,7 @@ fn render_filter_popup(frame: &mut Frame, app: &App, state: &FilterEditorState, 
     // --- Conditions list ---
     let mut condition_lines: Vec<Line> = if state.conditions.is_empty() {
         vec![Line::from(Span::styled(
-            "  (no filters — Tab to select fields, Enter to add)",
+            "  (no filters — Tab to select fields, Enter to add, r to apply)",
             Style::default().fg(Color::DarkGray),
         ))]
     } else {
@@ -418,7 +418,9 @@ fn render_filter_popup(frame: &mut Frame, app: &App, state: &FilterEditorState, 
             Span::styled(" Tab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::raw(":next  "),
             Span::styled("Enter", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw(":add/apply  "),
+            Span::raw(":add  "),
+            Span::styled("r", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(":apply  "),
             Span::styled("d", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::raw(":remove last  "),
             Span::styled("Esc", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
