@@ -91,6 +91,8 @@ pub enum Message {
     PrevPage,
     NextColPage,
     PrevColPage,
+    ColLeft,
+    ColRight,
     OpenFilterPopup,
     FilterTabNext,
     FilterNavUp,
@@ -120,6 +122,7 @@ pub struct App {
     pub dir_entries: Vec<DirEntryInfo>,
     pub browser_selected: usize,
     // Data inspector
+    pub inspector: Option<DuckDbInspector>,
     pub inspector_file: Option<PathBuf>,
     pub inspector_tab: InspectorTab,
     pub inspector_schema: Vec<(String, String)>,
@@ -133,6 +136,7 @@ pub struct App {
     pub inspector_scroll: usize,
     pub inspector_page: usize,
     pub inspector_col_page: usize,
+    pub inspector_selected_col: usize,
     pub inspector_stats_loaded: bool,
     pub inspector_filters: Vec<FilterCondition>,
     // Popup
@@ -161,6 +165,7 @@ impl App {
             current_dir: std::env::current_dir()?,
             dir_entries: Vec::new(),
             browser_selected: 0,
+            inspector: None,
             inspector_file: None,
             inspector_tab: InspectorTab::Schema,
             inspector_schema: Vec::new(),
@@ -174,6 +179,7 @@ impl App {
             inspector_scroll: 0,
             inspector_page: 0,
             inspector_col_page: 0,
+            inspector_selected_col: 0,
             inspector_stats_loaded: false,
             inspector_filters: Vec::new(),
             popup: Popup::None,
@@ -235,6 +241,11 @@ impl App {
     pub fn handle_event(&self, event: Event) -> Message {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => self.handle_key(key),
+            Event::Mouse(mouse) => match mouse.kind {
+                crossterm::event::MouseEventKind::ScrollUp => Message::ScrollUp,
+                crossterm::event::MouseEventKind::ScrollDown => Message::ScrollDown,
+                _ => Message::Noop,
+            },
             _ => Message::Noop,
         }
     }
@@ -311,13 +322,13 @@ impl App {
             },
             Screen::DataInspector => match key.code {
                 KeyCode::Tab => Message::SwitchTab,
-                KeyCode::Up | KeyCode::Char('k') => Message::ScrollUp,
-                KeyCode::Down | KeyCode::Char('j') => Message::ScrollDown,
+                KeyCode::Up | KeyCode::Char('k') => Message::PrevPage,
+                KeyCode::Down | KeyCode::Char('j') => Message::NextPage,
                 KeyCode::Char('c') => Message::ConvertFile,
                 KeyCode::Char('f') => Message::OpenFilterPopup,
                 KeyCode::Esc => Message::Back,
-                KeyCode::Right => Message::NextPage,
-                KeyCode::Left => Message::PrevPage,
+                KeyCode::Right => Message::ColRight,
+                KeyCode::Left => Message::ColLeft,
                 KeyCode::Char('l') => Message::NextColPage,
                 KeyCode::Char('h') => Message::PrevColPage,
                 _ => Message::Noop,
@@ -358,6 +369,8 @@ impl App {
             Message::PrevPage => self.prev_page(),
             Message::NextColPage => self.next_col_page(),
             Message::PrevColPage => self.prev_col_page(),
+            Message::ColLeft => self.col_left(),
+            Message::ColRight => self.col_right(),
             Message::OpenFilterPopup => self.open_filter_popup(),
             Message::FilterTabNext => self.filter_tab_next(),
             Message::FilterNavUp => self.filter_nav_up(),
@@ -474,6 +487,7 @@ impl App {
                 self.current_screen = Screen::FileBrowser;
             }
             Screen::DataInspector => {
+                self.inspector = None;
                 // Go back to file browser
                 if self.dir_entries.is_empty() {
                     if let Some(ref file) = self.inspector_file {
@@ -588,6 +602,7 @@ impl App {
         let total_col_pages = (total_cols + COLUMN_PAGE_SIZE - 1) / COLUMN_PAGE_SIZE;
         if self.inspector_col_page + 1 < total_col_pages {
             self.inspector_col_page += 1;
+            self.inspector_selected_col = 0;
             self.load_preview_page();
         }
     }
@@ -598,7 +613,39 @@ impl App {
         }
         if self.inspector_col_page > 0 {
             self.inspector_col_page -= 1;
+            self.inspector_selected_col = 0;
             self.load_preview_page();
+        }
+    }
+
+    fn col_left(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        if self.inspector_selected_col > 0 {
+            self.inspector_selected_col -= 1;
+        } else if self.inspector_col_page > 0 {
+            self.inspector_col_page -= 1;
+            let visible_len = self.visible_columns().len();
+            self.inspector_selected_col = visible_len.saturating_sub(1);
+            self.load_preview_page();
+        }
+    }
+
+    fn col_right(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        let visible_count = self.visible_columns().len();
+        if self.inspector_selected_col + 1 < visible_count {
+            self.inspector_selected_col += 1;
+        } else {
+            let total_col_pages = (self.inspector_schema.len() + COLUMN_PAGE_SIZE - 1) / COLUMN_PAGE_SIZE;
+            if self.inspector_col_page + 1 < total_col_pages {
+                self.inspector_col_page += 1;
+                self.inspector_selected_col = 0;
+                self.load_preview_page();
+            }
         }
     }
 
@@ -617,47 +664,36 @@ impl App {
         if self.inspector_stats_loaded {
             return;
         }
-        let file = match &self.inspector_file {
-            Some(f) => f.to_string_lossy().to_string(),
-            None => return,
-        };
-        match DuckDbInspector::new(file) {
-            Ok(inspector) => match inspector.column_stats(&self.inspector_schema) {
-                Ok((nulls, mins, maxs, means)) => {
-                    self.inspector_null_counts = nulls;
-                    self.inspector_min_values = mins;
-                    self.inspector_max_values = maxs;
-                    self.inspector_mean_values = means;
-                    self.inspector_stats_loaded = true;
-                }
-                Err(e) => self.show_error(e),
-            },
-            Err(e) => self.show_error(e),
+        let schema = self.inspector_schema.clone();
+        let result = self.inspector.as_ref().map(|i| i.column_stats(&schema));
+        match result {
+            Some(Ok((nulls, mins, maxs, means))) => {
+                self.inspector_null_counts = nulls;
+                self.inspector_min_values = mins;
+                self.inspector_max_values = maxs;
+                self.inspector_mean_values = means;
+                self.inspector_stats_loaded = true;
+            }
+            Some(Err(e)) => self.show_error(e),
+            None => {}
         }
     }
 
     fn load_preview_page(&mut self) {
-        let file = match &self.inspector_file {
-            Some(f) => f.to_string_lossy().to_string(),
-            None => return,
-        };
         let where_clause = Self::build_where_clause(&self.inspector_filters);
         let cols = self.visible_columns();
-        match DuckDbInspector::new(file) {
-            Ok(inspector) => match inspector.preview(
-                PAGE_SIZE,
-                self.inspector_page * PAGE_SIZE,
-                &where_clause,
-                Some(&cols),
-            ) {
-                Ok((headers, data)) => {
-                    self.inspector_preview_headers = headers;
-                    self.inspector_preview_data = data;
-                    self.inspector_scroll = 0;
-                }
-                Err(e) => self.show_error(e),
-            },
-            Err(e) => self.show_error(e),
+        let offset = self.inspector_page * PAGE_SIZE;
+        let result = self.inspector.as_ref().map(|i| {
+            i.preview(PAGE_SIZE, offset, &where_clause, Some(&cols))
+        });
+        match result {
+            Some(Ok((headers, data))) => {
+                self.inspector_preview_headers = headers;
+                self.inspector_preview_data = data;
+                self.inspector_scroll = 0;
+            }
+            Some(Err(e)) => self.show_error(e),
+            None => {}
         }
     }
 
@@ -788,27 +824,20 @@ impl App {
         self.inspector_scroll = 0;
         self.popup = Popup::None;
 
-        let file = match &self.inspector_file {
-            Some(f) => f.to_string_lossy().to_string(),
-            None => return,
-        };
         let where_clause = Self::build_where_clause(&self.inspector_filters);
         let cols = self.visible_columns();
-        match DuckDbInspector::new(file) {
-            Ok(inspector) => {
-                match inspector.row_count_filtered(&where_clause) {
-                    Ok(count) => self.inspector_row_count = count,
-                    Err(e) => { self.show_error(e); return; }
-                }
-                match inspector.preview(PAGE_SIZE, 0, &where_clause, Some(&cols)) {
-                    Ok((headers, data)) => {
-                        self.inspector_preview_headers = headers;
-                        self.inspector_preview_data = data;
-                    }
-                    Err(e) => self.show_error(e),
-                }
+        match self.inspector.as_ref().map(|i| i.row_count_filtered(&where_clause)) {
+            Some(Ok(count)) => self.inspector_row_count = count,
+            Some(Err(e)) => { self.show_error(e); return; }
+            None => return,
+        }
+        match self.inspector.as_ref().map(|i| i.preview(PAGE_SIZE, 0, &where_clause, Some(&cols))) {
+            Some(Ok((headers, data))) => {
+                self.inspector_preview_headers = headers;
+                self.inspector_preview_data = data;
             }
-            Err(e) => self.show_error(e),
+            Some(Err(e)) => self.show_error(e),
+            None => {}
         }
     }
 
@@ -844,23 +873,15 @@ impl App {
             Popup::ConvertConfirm { target_format } => target_format.clone(),
             _ => return,
         };
-
-        let file = match &self.inspector_file {
-            Some(f) => f.to_string_lossy().to_string(),
-            None => return,
-        };
-
-        match DuckDbInspector::new(file) {
-            Ok(inspector) => match inspector.convert(&target_format) {
-                Ok(path) => {
-                    self.popup = Popup::Message {
-                        title: "Success".to_string(),
-                        body: format!("Converted to {}", path),
-                    };
-                }
-                Err(e) => self.show_error(e),
-            },
-            Err(e) => self.show_error(e),
+        match self.inspector.as_ref().map(|i| i.convert(&target_format)) {
+            Some(Ok(path)) => {
+                self.popup = Popup::Message {
+                    title: "Success".to_string(),
+                    body: format!("Converted to {}", path),
+                };
+            }
+            Some(Err(e)) => self.show_error(e),
+            None => {}
         }
     }
 
@@ -988,6 +1009,7 @@ impl App {
 
         // Column pagination
         self.inspector_col_page = 0;
+        self.inspector_selected_col = 0;
         let cols = self.visible_columns();
 
         // Preview data (only visible columns)
@@ -1000,6 +1022,7 @@ impl App {
         self.inspector_filters = Vec::new();
         self.inspector_tab = InspectorTab::Preview;
 
+        self.inspector = Some(inspector);
         Ok(())
     }
 }
