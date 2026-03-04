@@ -37,7 +37,8 @@ pub const FILTER_OPERATORS: &[&str] = &[
     "=", "!=", ">", "<", ">=", "<=", "LIKE", "IS NULL", "IS NOT NULL",
 ];
 
-pub const PAGE_SIZE: usize = 50;
+pub const PAGE_SIZE: usize = 25;
+pub const COLUMN_PAGE_SIZE: usize = 10;
 
 #[derive(Debug, Clone)]
 pub struct FilterCondition {
@@ -88,6 +89,8 @@ pub enum Message {
     Noop,
     NextPage,
     PrevPage,
+    NextColPage,
+    PrevColPage,
     OpenFilterPopup,
     FilterTabNext,
     FilterNavUp,
@@ -129,6 +132,8 @@ pub struct App {
     pub inspector_row_count: usize,
     pub inspector_scroll: usize,
     pub inspector_page: usize,
+    pub inspector_col_page: usize,
+    pub inspector_stats_loaded: bool,
     pub inspector_filters: Vec<FilterCondition>,
     // Popup
     pub popup: Popup,
@@ -168,6 +173,8 @@ impl App {
             inspector_row_count: 0,
             inspector_scroll: 0,
             inspector_page: 0,
+            inspector_col_page: 0,
+            inspector_stats_loaded: false,
             inspector_filters: Vec::new(),
             popup: Popup::None,
             json_file: None,
@@ -311,6 +318,8 @@ impl App {
                 KeyCode::Esc => Message::Back,
                 KeyCode::Right => Message::NextPage,
                 KeyCode::Left => Message::PrevPage,
+                KeyCode::Char('l') => Message::NextColPage,
+                KeyCode::Char('h') => Message::PrevColPage,
                 _ => Message::Noop,
             },
             Screen::JsonInspector => match key.code {
@@ -347,6 +356,8 @@ impl App {
             Message::SwitchGeoTab => self.switch_geo_tab(),
             Message::NextPage => self.next_page(),
             Message::PrevPage => self.prev_page(),
+            Message::NextColPage => self.next_col_page(),
+            Message::PrevColPage => self.prev_col_page(),
             Message::OpenFilterPopup => self.open_filter_popup(),
             Message::FilterTabNext => self.filter_tab_next(),
             Message::FilterNavUp => self.filter_nav_up(),
@@ -494,7 +505,10 @@ impl App {
                 self.inspector_scroll = 0;
                 self.inspector_tab = match self.inspector_tab {
                     InspectorTab::Schema => InspectorTab::Preview,
-                    InspectorTab::Preview => InspectorTab::Schema,
+                    InspectorTab::Preview => {
+                        self.load_stats_if_needed();
+                        InspectorTab::Schema
+                    }
                 };
             }
         }
@@ -566,14 +580,76 @@ impl App {
         }
     }
 
+    fn next_col_page(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        let total_cols = self.inspector_schema.len();
+        let total_col_pages = (total_cols + COLUMN_PAGE_SIZE - 1) / COLUMN_PAGE_SIZE;
+        if self.inspector_col_page + 1 < total_col_pages {
+            self.inspector_col_page += 1;
+            self.load_preview_page();
+        }
+    }
+
+    fn prev_col_page(&mut self) {
+        if self.inspector_tab != InspectorTab::Preview {
+            return;
+        }
+        if self.inspector_col_page > 0 {
+            self.inspector_col_page -= 1;
+            self.load_preview_page();
+        }
+    }
+
+    /// Compute visible column names for the current column page
+    fn visible_columns(&self) -> Vec<String> {
+        let all_cols: Vec<String> = self.inspector_schema.iter().map(|(n, _)| n.clone()).collect();
+        let start = self.inspector_col_page * COLUMN_PAGE_SIZE;
+        let end = (start + COLUMN_PAGE_SIZE).min(all_cols.len());
+        if start >= all_cols.len() {
+            return all_cols; // fallback: show all if page is out of range
+        }
+        all_cols[start..end].to_vec()
+    }
+
+    fn load_stats_if_needed(&mut self) {
+        if self.inspector_stats_loaded {
+            return;
+        }
+        let file = match &self.inspector_file {
+            Some(f) => f.to_string_lossy().to_string(),
+            None => return,
+        };
+        match DuckDbInspector::new(file) {
+            Ok(inspector) => match inspector.column_stats(&self.inspector_schema) {
+                Ok((nulls, mins, maxs, means)) => {
+                    self.inspector_null_counts = nulls;
+                    self.inspector_min_values = mins;
+                    self.inspector_max_values = maxs;
+                    self.inspector_mean_values = means;
+                    self.inspector_stats_loaded = true;
+                }
+                Err(e) => self.show_error(e),
+            },
+            Err(e) => self.show_error(e),
+        }
+    }
+
     fn load_preview_page(&mut self) {
         let file = match &self.inspector_file {
             Some(f) => f.to_string_lossy().to_string(),
             None => return,
         };
         let where_clause = Self::build_where_clause(&self.inspector_filters);
+        let cols = self.visible_columns();
         match DuckDbInspector::new(file) {
-            Ok(inspector) => match inspector.preview(PAGE_SIZE, self.inspector_page * PAGE_SIZE, &where_clause) {
+            Ok(inspector) => match inspector.preview(
+                PAGE_SIZE,
+                self.inspector_page * PAGE_SIZE,
+                &where_clause,
+                Some(&cols),
+            ) {
                 Ok((headers, data)) => {
                     self.inspector_preview_headers = headers;
                     self.inspector_preview_data = data;
@@ -717,13 +793,14 @@ impl App {
             None => return,
         };
         let where_clause = Self::build_where_clause(&self.inspector_filters);
+        let cols = self.visible_columns();
         match DuckDbInspector::new(file) {
             Ok(inspector) => {
                 match inspector.row_count_filtered(&where_clause) {
                     Ok(count) => self.inspector_row_count = count,
                     Err(e) => { self.show_error(e); return; }
                 }
-                match inspector.preview(PAGE_SIZE, 0, &where_clause) {
+                match inspector.preview(PAGE_SIZE, 0, &where_clause, Some(&cols)) {
                     Ok((headers, data)) => {
                         self.inspector_preview_headers = headers;
                         self.inspector_preview_data = data;
@@ -902,43 +979,26 @@ impl App {
         self.inspector_schema = inspector.schema()?;
         self.inspector_row_count = inspector.row_count()?;
 
-        // Null counts per column
+        // Reset stats — will be loaded lazily when Schema tab is viewed
         self.inspector_null_counts = Vec::new();
-        for (name, _) in &self.inspector_schema {
-            match inspector.null_count(name) {
-                Ok(count) => self.inspector_null_counts.push(count),
-                Err(_) => self.inspector_null_counts.push(0),
-            }
-        }
-
         self.inspector_mean_values = Vec::new();
         self.inspector_min_values = Vec::new();
         self.inspector_max_values = Vec::new();
+        self.inspector_stats_loaded = false;
 
-        for (name, _) in &self.inspector_schema {
-            match inspector.mean_value(name) {
-                Ok(value) => self.inspector_mean_values.push(value),
-                Err(_) => self.inspector_mean_values.push("-".to_string()),
-            }
-            match inspector.min_value(name) {
-                Ok(value) => self.inspector_min_values.push(value),
-                Err(_) => self.inspector_min_values.push("-".to_string()),
-            }
-            match inspector.max_value(name) {
-                Ok(value) => self.inspector_max_values.push(value),
-                Err(_) => self.inspector_max_values.push("-".to_string()),
-            }
-        }
+        // Column pagination
+        self.inspector_col_page = 0;
+        let cols = self.visible_columns();
 
-        // Preview data
-        let (headers, data) = inspector.preview(50, 0, "")?;
+        // Preview data (only visible columns)
+        let (headers, data) = inspector.preview(PAGE_SIZE, 0, "", Some(&cols))?;
         self.inspector_preview_headers = headers;
         self.inspector_preview_data = data;
 
         self.inspector_scroll = 0;
         self.inspector_page = 0;
         self.inspector_filters = Vec::new();
-        self.inspector_tab = InspectorTab::Schema;
+        self.inspector_tab = InspectorTab::Preview;
 
         Ok(())
     }

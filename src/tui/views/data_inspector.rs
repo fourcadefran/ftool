@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, Tabs};
 
-use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, PAGE_SIZE, Popup, FILTER_OPERATORS};
+use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, PAGE_SIZE, COLUMN_PAGE_SIZE, Popup, FILTER_OPERATORS};
 use crate::tui::views::centered_rect;
 use crate::tui::widgets::status_bar;
 
@@ -73,19 +73,25 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     // Info bar (only in Preview tab)
-    if app.inspector_tab == InspectorTab::Preview {
+    if app.inspector_tab == InspectorTab::Preview && app.inspector_row_count > 0 {
         let from = app.inspector_page * PAGE_SIZE + 1;
         let to = ((app.inspector_page + 1) * PAGE_SIZE).min(app.inspector_row_count);
         let total_pages = (app.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
+        let total_cols = app.inspector_schema.len();
+        let total_col_pages = (total_cols + COLUMN_PAGE_SIZE - 1) / COLUMN_PAGE_SIZE;
 
         let info_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(33), Constraint::Percentage(34), Constraint::Percentage(33)])
             .split(info_area);
 
-        let left = Paragraph::new(format!(" showing {} to {} of {} ", from, to, app.inspector_row_count))
+        let left = Paragraph::new(format!(" rows {} to {} of {} ", from, to, app.inspector_row_count))
             .style(Style::default().fg(Color::DarkGray));
-        let right = Paragraph::new(format!(" page {} of {} ", app.inspector_page + 1, total_pages))
+        let right = Paragraph::new(format!(
+            " page {} of {} | cols {} of {} ",
+            app.inspector_page + 1, total_pages,
+            app.inspector_col_page + 1, total_col_pages,
+        ))
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Right);
 
@@ -108,8 +114,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         ("\u{2191}\u{2193}", "Scroll"),
     ];
     if app.inspector_tab == InspectorTab::Preview {
-        hints.push(("\u{2190}", "Previous page"));
-        hints.push(("\u{2192}", "Next page"));
+        hints.push(("\u{2190}\u{2192}", "Row page"));
+        hints.push(("h/l", "Col page"));
         hints.push(("f", "filter"));
     }
     hints.extend_from_slice(&[

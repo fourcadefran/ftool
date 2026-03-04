@@ -176,27 +176,22 @@ impl DuckDbInspector {
             .map_err(|e| DuckDbError::QueryError(format!("Failed to count rows: {}", e)))
     }
 
-    /// Returns the number of null values in a column
+    /// Returns the number of null values in a single column (used by CLI)
     pub fn null_count(&self, column_name: &str) -> Result<usize, DuckDbError> {
-        // Sanitize column name to prevent SQL injection
         let safe_column = Self::sanitize_identifier(column_name)?;
-
         let path = Path::new(&self.file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
         let read_function = if ext == "csv" {
             "read_csv_auto"
         } else {
             "read_parquet"
         };
-
         let query = format!(
             "SELECT COUNT(*) FROM {}('{}') WHERE {} IS NULL",
             read_function,
             self.file_path.replace('\'', "''"),
             safe_column
         );
-
         self.connection
             .query_row(&query, [], |row| row.get(0))
             .map_err(|e| {
@@ -207,9 +202,11 @@ impl DuckDbInspector {
             })
     }
 
-    pub fn min_value(&self, column_name: &str) -> Result<String, DuckDbError> {
-        let safe_column = Self::sanitize_identifier(column_name)?;
-
+    /// Returns (null_counts, min_values, max_values, mean_values) for all columns in a single query
+    pub fn column_stats(
+        &self,
+        schema: &[(String, String)],
+    ) -> Result<(Vec<usize>, Vec<String>, Vec<String>, Vec<String>), DuckDbError> {
         let path = Path::new(&self.file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let read_function = if ext == "csv" {
@@ -217,92 +214,82 @@ impl DuckDbInspector {
         } else {
             "read_parquet"
         };
+        let escaped_path = self.file_path.replace('\'', "''");
+
+        // Build a single query that computes all stats for all columns
+        // For each column: null_count, min, max, mean
+        let mut select_parts: Vec<String> = Vec::new();
+        select_parts.push("COUNT(*) AS total_rows".to_string());
+
+        for (name, _) in schema {
+            let safe = name.replace('"', "\"\"");
+            select_parts.push(format!("COUNT(\"{}\")", safe));
+            select_parts.push(format!("CAST(MIN(\"{}\") AS VARCHAR)", safe));
+            select_parts.push(format!("CAST(MAX(\"{}\") AS VARCHAR)", safe));
+            select_parts.push(format!(
+                "CAST(ROUND(AVG(TRY_CAST(\"{}\" AS DOUBLE)), 2) AS VARCHAR)",
+                safe
+            ));
+        }
 
         let query = format!(
-            "SELECT CAST(MIN({}) AS VARCHAR) FROM {}('{}')",
-            safe_column,
+            "SELECT {} FROM {}('{}')",
+            select_parts.join(", "),
             read_function,
-            self.file_path.replace('\'', "''")
+            escaped_path
         );
 
-        self.connection
-            .query_row(&query, [], |row| {
-                let val: Option<String> = row.get(0)?;
-                Ok(val.unwrap_or_else(|| "NULL".to_string()))
-            })
-            .map_err(|e| {
-                DuckDbError::QueryError(format!(
-                    "Failed to find min value in column '{}': {}",
-                    column_name, e
-                ))
-            })
+        let mut stmt = self.connection.prepare(&query).map_err(|e| {
+            DuckDbError::QueryError(format!("Failed to prepare column stats query: {}", e))
+        })?;
+
+        let mut null_counts = Vec::with_capacity(schema.len());
+        let mut min_values = Vec::with_capacity(schema.len());
+        let mut max_values = Vec::with_capacity(schema.len());
+        let mut mean_values = Vec::with_capacity(schema.len());
+
+        stmt.query_row([], |row| {
+            let total_rows: usize = row.get(0)?;
+
+            for i in 0..schema.len() {
+                let base = 1 + i * 4;
+                let nonnull: usize = row.get(base)?;
+                null_counts.push(total_rows - nonnull);
+
+                let min_val: Option<String> = row.get(base + 1)?;
+                min_values.push(min_val.unwrap_or_else(|| "-".to_string()));
+
+                let max_val: Option<String> = row.get(base + 2)?;
+                max_values.push(max_val.unwrap_or_else(|| "-".to_string()));
+
+                let mean_val: Option<String> = row.get(base + 3)?;
+                mean_values.push(mean_val.unwrap_or_else(|| "-".to_string()));
+            }
+
+            Ok(())
+        })
+        .map_err(|e| {
+            DuckDbError::QueryError(format!("Failed to execute column stats query: {}", e))
+        })?;
+
+        Ok((null_counts, min_values, max_values, mean_values))
     }
 
-    pub fn max_value(&self, column_name: &str) -> Result<String, DuckDbError> {
-        let safe_column = Self::sanitize_identifier(column_name)?;
-
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let read_function = if ext == "csv" {
-            "read_csv_auto"
+    /// Returns a preview of rows as (headers, rows_of_strings), with optional WHERE clause.
+    /// If `columns` is provided, only those columns are selected; otherwise all columns are used.
+    pub fn preview(
+        &self,
+        limit: usize,
+        offset: usize,
+        where_clause: &str,
+        columns: Option<&[String]>,
+    ) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
+        let headers: Vec<String> = if let Some(cols) = columns {
+            cols.to_vec()
         } else {
-            "read_parquet"
+            let schema = self.schema()?;
+            schema.into_iter().map(|(name, _)| name).collect()
         };
-
-        let query = format!(
-            "SELECT CAST(MAX({}) AS VARCHAR) FROM {}('{}')",
-            safe_column,
-            read_function,
-            self.file_path.replace('\'', "''")
-        );
-
-        self.connection
-            .query_row(&query, [], |row| {
-                let val: Option<String> = row.get(0)?;
-                Ok(val.unwrap_or_else(|| "NULL".to_string()))
-            })
-            .map_err(|e| {
-                DuckDbError::QueryError(format!(
-                    "Failed to find max value in column '{}': {}",
-                    column_name, e
-                ))
-            })
-    }
-    pub fn mean_value(&self, column_name: &str) -> Result<String, DuckDbError> {
-        let safe_column = Self::sanitize_identifier(column_name)?;
-
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let read_function = if ext == "csv" {
-            "read_csv_auto"
-        } else {
-            "read_parquet"
-        };
-
-        let query = format!(
-            "SELECT CAST(ROUND(AVG({}), 2) AS VARCHAR) FROM {}('{}')",
-            safe_column,
-            read_function,
-            self.file_path.replace('\'', "''")
-        );
-
-        self.connection
-            .query_row(&query, [], |row| {
-                let val: Option<String> = row.get(0)?;
-                Ok(val.unwrap_or_else(|| "NULL".to_string()))
-            })
-            .map_err(|e| {
-                DuckDbError::QueryError(format!(
-                    "Failed to find mean value in column '{}': {}",
-                    column_name, e
-                ))
-            })
-    }
-
-    /// Returns a preview of rows as (headers, rows_of_strings), with optional WHERE clause
-    pub fn preview(&self, limit: usize, offset: usize, where_clause: &str) -> Result<(Vec<String>, Vec<Vec<String>>), DuckDbError> {
-        let schema = self.schema()?;
-        let headers: Vec<String> = schema.iter().map(|(name, _)| name.clone()).collect();
 
         let path = Path::new(&self.file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
