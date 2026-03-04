@@ -96,7 +96,7 @@ pub enum Message {
     FilterBackspace,
     FilterAddCondition,
     FilterRemoveLast,
-    FilterApply,
+    FilterApplyWithCurrent,
 }
 
 pub struct DirEntryInfo {
@@ -256,16 +256,13 @@ impl App {
                     KeyCode::Down => Message::FilterNavDown,
                     KeyCode::Backspace => Message::FilterBackspace,
                     KeyCode::Enter => {
-                        if state.active_field == FilterField::Value {
-                            if state.value_input.is_empty() {
-                                Message::FilterApply
-                            } else {
-                                Message::FilterAddCondition
-                            }
+                        if state.active_field == FilterField::Value && !state.value_input.is_empty() {
+                            Message::FilterAddCondition
                         } else {
                             Message::FilterTabNext
                         }
                     }
+                    KeyCode::Char('r') => Message::FilterApplyWithCurrent,
                     KeyCode::Char('d') if state.active_field != FilterField::Value => {
                         Message::FilterRemoveLast
                     }
@@ -358,7 +355,7 @@ impl App {
             Message::FilterBackspace => self.filter_backspace(),
             Message::FilterAddCondition => self.filter_add_condition(),
             Message::FilterRemoveLast => self.filter_remove_last(),
-            Message::FilterApply => self.filter_apply(),
+            Message::FilterApplyWithCurrent => self.filter_apply_with_current(),
             Message::Noop => {}
         }
     }
@@ -670,10 +667,11 @@ impl App {
         if let Popup::FilterEditor(ref mut state) = self.popup {
             if let Some((col_name, _)) = self.inspector_schema.get(state.column_idx) {
                 let op = FILTER_OPERATORS[state.operator_idx];
+                let is_null_op = op == "IS NULL" || op == "IS NOT NULL";
                 state.conditions.push(FilterCondition {
                     column: col_name.clone(),
                     operator: op.to_string(),
-                    value: state.value_input.clone(),
+                    value: if is_null_op { String::new() } else { state.value_input.clone() },
                 });
                 state.value_input.clear();
                 state.active_field = FilterField::Column;
@@ -685,6 +683,22 @@ impl App {
         if let Popup::FilterEditor(ref mut state) = self.popup {
             state.conditions.pop();
         }
+    }
+
+    fn filter_apply_with_current(&mut self) {
+        let should_add = if let Popup::FilterEditor(ref state) = self.popup {
+            let op = FILTER_OPERATORS[state.operator_idx];
+            let is_null_op = op == "IS NULL" || op == "IS NOT NULL";
+            is_null_op || !state.value_input.is_empty()
+        } else {
+            false
+        };
+
+        if should_add {
+            self.filter_add_condition();
+        }
+
+        self.filter_apply();
     }
 
     fn filter_apply(&mut self) {
