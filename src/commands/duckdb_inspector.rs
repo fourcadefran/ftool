@@ -81,6 +81,18 @@ impl DuckDbInspector {
         })
     }
 
+    fn read_function(&self) -> &'static str {
+        let ext = Path::new(&self.file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if ext == "csv" { "read_csv_auto" } else { "read_parquet" }
+    }
+
+    fn escape_path(&self) -> String {
+        self.file_path.replace('\'', "''")
+    }
+
     /// Sanitize identifier to prevent SQL injection
     fn sanitize_identifier(name: &str) -> Result<String, DuckDbError> {
         // Allow only alphanumeric, underscore, and some safe characters
@@ -96,25 +108,10 @@ impl DuckDbInspector {
 
     /// Returns the file schema (column name + type) for CSV or Parquet files
     pub fn schema(&self) -> Result<Vec<(String, String)>, DuckDbError> {
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().unwrap_or_default();
-
-        let read_function = if ext == "parquet" {
-            "read_parquet"
-        } else if ext == "csv" {
-            "read_csv_auto"
-        } else {
-            return Err(DuckDbError::InvalidFileFormat(format!(
-                "Unsupported file format: {}",
-                ext.to_string_lossy()
-            )));
-        };
-
-        // Use parameterized query to prevent SQL injection
         let query = format!(
             "DESCRIBE SELECT * FROM {}('{}')",
-            read_function,
-            self.file_path.replace('\'', "''") // Escape single quotes
+            self.read_function(),
+            self.escape_path()
         );
 
         let mut stmt = self.connection.prepare(&query).map_err(|e| {
@@ -155,19 +152,10 @@ impl DuckDbInspector {
 
     /// Returns the number of rows matching an optional WHERE clause
     pub fn row_count_filtered(&self, where_clause: &str) -> Result<usize, DuckDbError> {
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-        let read_function = if ext == "csv" {
-            "read_csv_auto"
-        } else {
-            "read_parquet"
-        };
-
         let query = format!(
             "SELECT COUNT(*) FROM {}('{}') {}",
-            read_function,
-            self.file_path.replace('\'', "''"),
+            self.read_function(),
+            self.escape_path(),
             where_clause,
         );
 
@@ -179,17 +167,10 @@ impl DuckDbInspector {
     /// Returns the number of null values in a single column (used by CLI)
     pub fn null_count(&self, column_name: &str) -> Result<usize, DuckDbError> {
         let safe_column = Self::sanitize_identifier(column_name)?;
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let read_function = if ext == "csv" {
-            "read_csv_auto"
-        } else {
-            "read_parquet"
-        };
         let query = format!(
             "SELECT COUNT(*) FROM {}('{}') WHERE {} IS NULL",
-            read_function,
-            self.file_path.replace('\'', "''"),
+            self.read_function(),
+            self.escape_path(),
             safe_column
         );
         self.connection
@@ -207,19 +188,9 @@ impl DuckDbInspector {
         &self,
         schema: &[(String, String)],
     ) -> Result<(Vec<usize>, Vec<String>, Vec<String>, Vec<String>), DuckDbError> {
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let read_function = if ext == "csv" {
-            "read_csv_auto"
-        } else {
-            "read_parquet"
-        };
-        let escaped_path = self.file_path.replace('\'', "''");
-
         // Build a single query that computes all stats for all columns
         // For each column: null_count, min, max, mean
-        let mut select_parts: Vec<String> = Vec::new();
-        select_parts.push("COUNT(*) AS total_rows".to_string());
+        let mut select_parts = vec!["COUNT(*) AS total_rows".to_string()];
 
         for (name, _) in schema {
             let safe = name.replace('"', "\"\"");
@@ -235,8 +206,8 @@ impl DuckDbInspector {
         let query = format!(
             "SELECT {} FROM {}('{}')",
             select_parts.join(", "),
-            read_function,
-            escaped_path
+            self.read_function(),
+            self.escape_path()
         );
 
         let mut stmt = self.connection.prepare(&query).map_err(|e| {
@@ -291,15 +262,6 @@ impl DuckDbInspector {
             schema.into_iter().map(|(name, _)| name).collect()
         };
 
-        let path = Path::new(&self.file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let read_function = if ext == "csv" {
-            "read_csv_auto"
-        } else {
-            "read_parquet"
-        };
-        let escaped_path = self.file_path.replace('\'', "''");
-
         // Cast all columns to VARCHAR, replacing NULLs with the string "NULL"
         let columns: Vec<String> = headers
             .iter()
@@ -312,8 +274,8 @@ impl DuckDbInspector {
         let query = format!(
             "SELECT {} FROM {}('{}') {} LIMIT {} OFFSET {}",
             columns.join(", "),
-            read_function,
-            escaped_path,
+            self.read_function(),
+            self.escape_path(),
             where_clause,
             limit,
             offset
@@ -376,7 +338,7 @@ impl DuckDbInspector {
 
         let query = format!(
             "COPY (SELECT * FROM '{}') TO '{}' (FORMAT {})",
-            self.file_path.replace('\'', "''"),
+            self.escape_path(),
             target_path.replace('\'', "''"),
             format_str
         );
