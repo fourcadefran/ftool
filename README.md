@@ -13,7 +13,7 @@ This project is primarily a **learning-oriented Rust CLI**, focused on writing i
 Built with **ratatui** — launch it by just running `ftool`:
 
 * Home menu with quick actions
-* File browser with directory navigation and file preview
+* File browser with directory navigation and file metadata preview
 * Data inspector for CSV and Parquet files with Schema and Preview tabs
 * JSON and GeoJSON inspector with Tree, Raw, and Features views
 * In-TUI file format conversion (CSV ↔ Parquet)
@@ -22,17 +22,21 @@ Built with **ratatui** — launch it by just running `ftool`:
 
 Powered by **DuckDB (embedded)**:
 
-* **Schema tab** — column names, types, null counts, min/max/avg statistics
-* **Preview tab** — paginated data view (50 rows per page) with left/right navigation
-* **Filters** — add multiple filter conditions (column / operator / value) with AND logic; 9 operators supported (`=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`)
-* Active filter count shown in the info bar when filters are applied
+* **Schema tab** — column names, types, null counts, min/max/avg statistics (loaded lazily on first view)
+* **Preview tab** — paginated data view (25 rows per page, 10 columns per page)
+  * `↑` / `↓` (or `j` / `k`) paginate rows
+  * `←` / `→` move the column cursor (auto-advances column page at the boundary)
+  * `h` / `l` jump an entire column page at once
+  * Mouse scroll to scroll rows within the current page
+  * Selected column highlighted in header and cells
+* **Filters** — multi-condition filter builder with AND logic; 9 operators supported (`=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`); active filter count shown in the info bar
 * In-TUI format conversion (CSV ↔ Parquet)
 
 ### 🗺 JSON & GeoJSON Inspector
 
 * **Tree view** — collapsible key/value tree for JSON objects and arrays
 * **Raw view** — pretty-printed JSON source
-* **GeoJSON** — dedicated Summary, Features, and Tree tabs; feature properties table
+* **GeoJSON** — dedicated Summary, Features, and Tree tabs; feature properties table and bounding box
 
 ### 📂 File utilities
 
@@ -93,19 +97,23 @@ ftool tui data.geojson
 | | `Esc` | Back to Home |
 | | `q` | Quit |
 | Data Inspector | `Tab` | Switch Schema / Preview tabs |
-| | `↑↓` / `j k` | Scroll |
-| | `←` / `→` | Previous / next page (Preview tab) |
+| | `↑↓` / `j k` | Previous / next row page (Preview tab) |
+| | `←` / `→` | Move column cursor left / right (Preview tab) |
+| | `h` / `l` | Jump entire column page left / right (Preview tab) |
+| | `scroll` | Scroll rows within current page / scroll schema |
 | | `f` | Open filter editor (Preview tab) |
 | | `c` | Convert format (CSV ↔ Parquet) |
 | | `Esc` | Back to File Browser |
 | | `q` | Quit |
 | Filter Editor | `Tab` | Next field (Column → Operator → Value) |
 | | `↑↓` | Change selected column or operator |
-| | `Enter` | Add condition / apply filters |
+| | `Enter` | Add condition |
+| | `r` | Apply all conditions |
 | | `d` | Remove last condition |
 | | `Esc` | Cancel |
 | JSON Inspector | `Tab` | Switch tabs |
 | | `↑↓` / `j k` | Scroll |
+| | `Enter` | Expand / collapse node (Tree tab) |
 | | `Esc` | Back to File Browser |
 | | `q` | Quit |
 
@@ -185,11 +193,7 @@ cargo install --path .
 
 ## 🔮 Future ideas
 
-* Shell autocompletion
-* Query mode (free-form SQL on files)
-* Todo list in TUI
-* Recent files history
-* Export filtered results to CSV/JSON
+See [ROADMAP.md](ROADMAP.md) for the full list of planned improvements.
 
 ---
 

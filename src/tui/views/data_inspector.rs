@@ -2,9 +2,9 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table, Tabs};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Tabs};
 
-use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, PAGE_SIZE, Popup, FILTER_OPERATORS};
+use crate::tui::app::{App, FilterEditorState, FilterField, InspectorTab, PAGE_SIZE, COLUMN_PAGE_SIZE, Popup, FILTER_OPERATORS};
 use crate::tui::views::centered_rect;
 use crate::tui::widgets::status_bar;
 
@@ -73,19 +73,25 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     // Info bar (only in Preview tab)
-    if app.inspector_tab == InspectorTab::Preview {
+    if app.inspector_tab == InspectorTab::Preview && app.inspector_row_count > 0 {
         let from = app.inspector_page * PAGE_SIZE + 1;
         let to = ((app.inspector_page + 1) * PAGE_SIZE).min(app.inspector_row_count);
         let total_pages = (app.inspector_row_count + PAGE_SIZE - 1) / PAGE_SIZE;
+        let total_cols = app.inspector_schema.len();
+        let total_col_pages = (total_cols + COLUMN_PAGE_SIZE - 1) / COLUMN_PAGE_SIZE;
 
         let info_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(33), Constraint::Percentage(34), Constraint::Percentage(33)])
             .split(info_area);
 
-        let left = Paragraph::new(format!(" showing {} to {} of {} ", from, to, app.inspector_row_count))
+        let left = Paragraph::new(format!(" rows {} to {} of {} ", from, to, app.inspector_row_count))
             .style(Style::default().fg(Color::DarkGray));
-        let right = Paragraph::new(format!(" page {} of {} ", app.inspector_page + 1, total_pages))
+        let right = Paragraph::new(format!(
+            " page {} of {} | cols {} of {} ",
+            app.inspector_page + 1, total_pages,
+            app.inspector_col_page + 1, total_col_pages,
+        ))
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Right);
 
@@ -105,12 +111,14 @@ pub fn render(frame: &mut Frame, app: &App) {
     // Status bar
     let mut hints: Vec<(&str, &str)> = vec![
         ("Tab", "Switch"),
-        ("\u{2191}\u{2193}", "Scroll"),
     ];
     if app.inspector_tab == InspectorTab::Preview {
-        hints.push(("\u{2190}", "Previous page"));
-        hints.push(("\u{2192}", "Next page"));
-        hints.push(("f", "filter"));
+        hints.push(("\u{2191}\u{2193}", "Row page"));
+        hints.push(("\u{2190}\u{2192}", "Col cursor"));
+        hints.push(("h/l", "Col page"));
+        hints.push(("f", "Filter"));
+    } else {
+        hints.push(("scroll", "Scroll"));
     }
     hints.extend_from_slice(&[
         ("c", "Convert"),
@@ -194,21 +202,39 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Build header row
-    let header = Row::new(app.inspector_preview_headers.clone())
-        .style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .bottom_margin(1);
+    let selected = app.inspector_selected_col;
 
-    // Build data rows with scroll offset
+    // Header row with selected column highlighted in yellow
+    let header_cells: Vec<Cell> = app.inspector_preview_headers.iter().enumerate()
+        .map(|(i, h)| {
+            let style = if i == selected {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            };
+            Cell::from(h.as_str()).style(style)
+        })
+        .collect();
+    let header = Row::new(header_cells).bottom_margin(1);
+
+    // Data rows with selected column highlighted
     let rows: Vec<Row> = app
         .inspector_preview_data
         .iter()
         .skip(app.inspector_scroll)
-        .map(|row_data| Row::new(row_data.clone()))
+        .map(|row_data| {
+            let cells: Vec<Cell> = row_data.iter().enumerate()
+                .map(|(i, val)| {
+                    let style = if i == selected {
+                        Style::default().bg(Color::DarkGray).fg(Color::White)
+                    } else {
+                        Style::default()
+                    };
+                    Cell::from(val.as_str()).style(style)
+                })
+                .collect();
+            Row::new(cells)
+        })
         .collect();
 
     // Column widths - distribute evenly
