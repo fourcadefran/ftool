@@ -10,13 +10,27 @@ use crate::tui::widgets::status_bar;
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
+    let constraints = if app.browser_search_active {
+        vec![
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ]
+    } else {
+        vec![Constraint::Min(0), Constraint::Length(1)]
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints(constraints)
         .split(area);
 
     let main_area = chunks[0];
-    let status_area = chunks[1];
+    let (search_area, status_area) = if app.browser_search_active {
+        (Some(chunks[1]), chunks[2])
+    } else {
+        (None, chunks[1])
+    };
 
     // Outer block with directory path as title
     let title = format!(" File Browser: {} ", app.current_dir.display());
@@ -38,17 +52,38 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_file_list(frame, app, panels[0]);
     render_preview(frame, app, panels[1]);
 
+    // Search bar
+    if let Some(search_area) = search_area {
+        render_search_bar(frame, app, search_area);
+    }
+
     // Status bar
-    status_bar::render(
-        frame,
-        status_area,
-        &[
+    let hints: Vec<(&str, &str)> = if app.browser_search_active {
+        vec![
+            ("\u{2191}\u{2193}", "navigate"),
+            ("Enter", "open"),
+            ("Esc", "clear search"),
+        ]
+    } else {
+        vec![
             ("\u{2191}\u{2193}", "navigate"),
             ("Enter", "open"),
             ("Esc", "back"),
+            ("/", "search"),
             ("q", "quit"),
-        ],
-    );
+        ]
+    };
+    status_bar::render(frame, status_area, &hints);
+}
+
+fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let line = Line::from(vec![
+        Span::styled("/ ", Style::default().fg(Color::Cyan)),
+        Span::raw(&app.browser_search_query),
+        Span::styled("\u{2588}", Style::default().fg(Color::Gray)),
+    ]);
+    let paragraph = Paragraph::new(line);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -60,8 +95,16 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
         )
         .bottom_margin(1);
 
-    let rows: Vec<Row> = app
-        .dir_entries
+    let entries: Vec<&crate::tui::app::DirEntryInfo> = if app.browser_search_active {
+        app.browser_filtered_indices
+            .iter()
+            .filter_map(|&i| app.dir_entries.get(i))
+            .collect()
+    } else {
+        app.dir_entries.iter().collect()
+    };
+
+    let rows: Vec<Row> = entries
         .iter()
         .map(|entry| {
             let name = if entry.is_dir && entry.name != ".." {
@@ -126,7 +169,15 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let content = if let Some(entry) = app.dir_entries.get(app.browser_selected) {
+    let actual_index = if app.browser_search_active {
+        app.browser_filtered_indices
+            .get(app.browser_selected)
+            .copied()
+    } else {
+        Some(app.browser_selected)
+    };
+
+    let content = if let Some(entry) = actual_index.and_then(|i| app.dir_entries.get(i)) {
         if entry.name == ".." {
             vec![
                 Line::from(Span::styled(
