@@ -102,6 +102,10 @@ pub enum Message {
     FilterAddCondition,
     FilterRemoveLast,
     FilterApplyWithCurrent,
+    BrowserSearchActivate,
+    BrowserSearchChar(char),
+    BrowserSearchBackspace,
+    BrowserSearchExit,
 }
 
 pub struct DirEntryInfo {
@@ -121,6 +125,9 @@ pub struct App {
     pub current_dir: PathBuf,
     pub dir_entries: Vec<DirEntryInfo>,
     pub browser_selected: usize,
+    pub browser_search_active: bool,
+    pub browser_search_query: String,
+    pub browser_filtered_indices: Vec<usize>,
     // Data inspector
     pub inspector: Option<DuckDbInspector>,
     pub inspector_file: Option<PathBuf>,
@@ -165,6 +172,9 @@ impl App {
             current_dir: std::env::current_dir()?,
             dir_entries: Vec::new(),
             browser_selected: 0,
+            browser_search_active: false,
+            browser_search_query: String::new(),
+            browser_filtered_indices: Vec::new(),
             inspector: None,
             inspector_file: None,
             inspector_tab: InspectorTab::Schema,
@@ -297,6 +307,19 @@ impl App {
             Popup::None => {}
         }
 
+        // Browser search mode intercept
+        if self.current_screen == Screen::FileBrowser && self.browser_search_active {
+            return match key.code {
+                KeyCode::Esc => Message::BrowserSearchExit,
+                KeyCode::Backspace => Message::BrowserSearchBackspace,
+                KeyCode::Up => Message::NavigateUp,
+                KeyCode::Down => Message::NavigateDown,
+                KeyCode::Enter => Message::Enter,
+                KeyCode::Char(c) => Message::BrowserSearchChar(c),
+                _ => Message::Noop,
+            };
+        }
+
         // Global quit
         if key.code == KeyCode::Char('q') {
             return Message::Quit;
@@ -318,6 +341,7 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => Message::NavigateDown,
                 KeyCode::Enter => Message::Enter,
                 KeyCode::Esc => Message::Back,
+                KeyCode::Char('/') => Message::BrowserSearchActivate,
                 _ => Message::Noop,
             },
             Screen::DataInspector => match key.code {
@@ -380,6 +404,10 @@ impl App {
             Message::FilterAddCondition => self.filter_add_condition(),
             Message::FilterRemoveLast => self.filter_remove_last(),
             Message::FilterApplyWithCurrent => self.filter_apply_with_current(),
+            Message::BrowserSearchActivate => self.browser_search_activate(),
+            Message::BrowserSearchChar(c) => self.browser_search_char(c),
+            Message::BrowserSearchBackspace => self.browser_search_backspace(),
+            Message::BrowserSearchExit => self.browser_search_exit(),
             Message::Noop => {}
         }
     }
@@ -408,7 +436,12 @@ impl App {
                 }
             }
             Screen::FileBrowser => {
-                if self.browser_selected + 1 < self.dir_entries.len() {
+                let upper = if self.browser_search_active {
+                    self.browser_filtered_indices.len()
+                } else {
+                    self.dir_entries.len()
+                };
+                if self.browser_selected + 1 < upper {
                     self.browser_selected += 1;
                 }
             }
@@ -432,7 +465,15 @@ impl App {
             Screen::FileBrowser => {
                 let entry_path;
                 let entry_is_dir;
-                if let Some(entry) = self.dir_entries.get(self.browser_selected) {
+                let actual_index = if self.browser_search_active {
+                    match self.browser_filtered_indices.get(self.browser_selected) {
+                        Some(&idx) => idx,
+                        None => return,
+                    }
+                } else {
+                    self.browser_selected
+                };
+                if let Some(entry) = self.dir_entries.get(actual_index) {
                     entry_path = entry.path.clone();
                     entry_is_dir = entry.is_dir;
                 } else {
@@ -954,6 +995,45 @@ impl App {
         };
     }
 
+    fn apply_browser_search_filter(&mut self) {
+        let query = self.browser_search_query.to_lowercase();
+        self.browser_filtered_indices = self
+            .dir_entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.name == ".." || entry.name.to_lowercase().contains(&query)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if self.browser_selected >= self.browser_filtered_indices.len() {
+            self.browser_selected = self.browser_filtered_indices.len().saturating_sub(1);
+        }
+    }
+
+    fn browser_search_activate(&mut self) {
+        self.browser_search_active = true;
+        self.browser_search_query.clear();
+        self.apply_browser_search_filter();
+    }
+
+    fn browser_search_char(&mut self, c: char) {
+        self.browser_search_query.push(c);
+        self.apply_browser_search_filter();
+    }
+
+    fn browser_search_backspace(&mut self) {
+        self.browser_search_query.pop();
+        self.apply_browser_search_filter();
+    }
+
+    fn browser_search_exit(&mut self) {
+        self.browser_search_active = false;
+        self.browser_search_query.clear();
+        self.browser_filtered_indices.clear();
+        self.browser_selected = 0;
+    }
+
     fn load_dir_entries(&mut self) -> anyhow::Result<()> {
         let mut entries = Vec::new();
 
@@ -991,6 +1071,9 @@ impl App {
         entries.extend(file_entries);
         self.dir_entries = entries;
         self.browser_selected = 0;
+        self.browser_search_active = false;
+        self.browser_search_query.clear();
+        self.browser_filtered_indices.clear();
         Ok(())
     }
 
